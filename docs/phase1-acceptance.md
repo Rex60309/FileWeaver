@@ -32,6 +32,12 @@ It is not a release announcement.
   DLL at runtime. Reconfigured independent empty build directories using the
   existing vcpkg toolchain, which deploys the runtime DLL. Nothing was silently
   skipped or worked around in the product tests.
+- After initial commit e2a68e0, an independent Git clone with --no-hardlinks
+  produced an actual clean checkout in a new ignored directory. Release preset
+  configured with the existing pinned vcpkg toolchain and cached dependencies;
+  fresh build and all 11 CTest groups passed (42.99 seconds). No pre-existing
+  project objects were used. This is not a clean-machine dependency installation
+  or packaged-release claim.
 - Ubuntu WSL2 GCC 13.3.0: Debug 11/11 passed. Combined ASan/UBSan 11/11 passed
   with ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 and
   UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1. Dependencies are separately
@@ -77,10 +83,18 @@ make rather than Ninja. This does not change repository preset defaults.
 
 ## Open acceptance items
 
+Hosted run [42561449394](https://github.com/Rex60309/FileWeaver/actions/runs/42561449394)
+on e2a68e0 passed Ubuntu Debug/Release but failed the analysis formatter-version
+mismatch and MSVC file-clock compilation. These failures are retained, not labeled
+passes. [ADR-0026](decisions/ADR-0026-ci-tooling-and-clock-portability.md) records
+the focused fixes. After them, Windows Debug/Release again pass 11 groups each,
+format/lint pass, and applicable rebuilt Linux ASan/UBSan storage plus independent
+UTC/filter matrix pass 2/2 groups. Hosted retry remains required.
+
 - Hosted CI has not yet completed. A Release test preset and Release CI test step
   were added; MSVC explicitly compiles project sources as UTF-8.
-- Linux Release initially passed 11/11 groups; final-revision reruns and a Git
-  clean-checkout run are pending recording.
+- Linux final Debug/Release and ASan/UBSan pass; actual Git clean-checkout
+  Release build/test also passes, as recorded above.
 - SPEC 3.2 creation-time gap was explicitly approved and implemented for Windows:
   [creation-time evidence](creation-time-verification.md). Focused 2-case /
   31-assertion and Windows full Debug/Release suites pass. Linux Debug/Release
@@ -89,6 +103,10 @@ make rather than Ninja. This does not change repository preset defaults.
   and broader resource measurements remain unmeasured. Existing reports do not
   claim them. Phase 1's explicit four acceptance points have local evidence;
   whole-product performance/architecture aspirations are not all Phase 1 features.
+
+Current-binary 100k-file benchmark: [2026-11-09 measurements](performance/phase1-100k-20261109.md).
+All 168 timing samples and six CLI memory observations are correct. Raw fixture,
+report and binaries remain ignored. No controlled cold-cache claim is made.
 
 User source files remain read-only. No clipboard/content collection, file
 management, telemetry or product network behavior was added. GitHub access is

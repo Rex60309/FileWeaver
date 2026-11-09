@@ -50,7 +50,10 @@ jobs:
           ref: ec48c11eae9448c8c6e7739d93e06fa2433aa95f
           path: build/tools/vcpkg
       - run: ./build/tools/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-      - run: sudo apt-get update && sudo apt-get install -y ninja-build clang-format clang-tidy
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build clang
+      - run: python3 -m pip install --target build/tools/python -r tools/requirements-analysis.txt
+      - run: build/tools/python/clang_format/data/bin/clang-format --version
+      - run: build/tools/python/clang_tidy/data/bin/clang-tidy --version
       - run: cmake --preset debug
       - run: cmake --build --preset debug --target format-check
       - run: cmake --build --preset debug --target lint

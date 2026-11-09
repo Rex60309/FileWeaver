@@ -153,13 +153,23 @@ std::int64_t checked_count(std::uint64_t value) {
     return static_cast<std::int64_t>(value);
 }
 
+template <class Duration>
+auto file_time_to_sys(
+    const std::chrono::time_point<std::filesystem::file_time_type::clock, Duration> &value) {
+#if defined(__cpp_lib_chrono) && __cpp_lib_chrono >= 201907L
+    return std::chrono::clock_cast<std::chrono::system_clock>(value);
+#else
+    return std::filesystem::file_time_type::clock::to_sys(value);
+#endif
+}
+
 std::int64_t modified_nanoseconds(std::filesystem::file_time_type value) {
     using WideSeconds = std::chrono::duration<long double>;
     using FileClock = std::filesystem::file_time_type::clock;
     const std::chrono::time_point<FileClock, WideSeconds> wide(
         std::chrono::duration_cast<WideSeconds>(value.time_since_epoch()));
     const auto nanos =
-        std::chrono::duration<long double, std::nano>(FileClock::to_sys(wide).time_since_epoch())
+        std::chrono::duration<long double, std::nano>(file_time_to_sys(wide).time_since_epoch())
             .count();
     if (!std::isfinite(nanos) ||
         nanos >= static_cast<long double>((std::numeric_limits<std::int64_t>::max)()) ||
@@ -167,7 +177,7 @@ std::int64_t modified_nanoseconds(std::filesystem::file_time_type value) {
         throw StorageError("File timestamp exceeds supported database range", 1);
     }
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
-               FileClock::to_sys(value).time_since_epoch())
+               file_time_to_sys(value).time_since_epoch())
         .count();
 }
 

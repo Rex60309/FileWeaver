@@ -612,6 +612,9 @@ passed. Ubuntu WSL2 GCC 13.3.0 Debug/Release and ASan/UBSan also have executed
 passing evidence; current-revision acceptance is tracked in
 [the Phase 1 ledger](docs/phase1-acceptance.md). Hosted CI results are recorded
 there separately from local checks. See docs/verification.md for command details.
+For matching analysis-tool versions, install
+`python -m pip install --target build/tools/python -r tools/requirements-analysis.txt`.
+These developer tools are separate from product runtime dependencies.
 
 Indexing reads metadata only from explicitly selected roots. There is no source-file
 mutation, content collection, telemetry, or runtime network activity. Storage writes
