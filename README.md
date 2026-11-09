@@ -75,6 +75,8 @@ ctest --preset desktop-release --output-on-failure
 
 這兩個 preset 開啟 `FILEWEAVER_BUILD_DESKTOP` 與 vcpkg 的 `desktop` feature，
 首次會下載並編譯 Qt 6 Widgets／Test 及其依賴；預設 CLI preset 不需要 Qt。
+若 PCRE2 依賴下載因 GitHub API 的 JSON 排版變動而發生 SHA512 不符，可先執行
+`python tools/prepare_qt_download.py` 再重新設定；此步驟仍要求符合固定版本的原始雜湊，不會略過驗證。
 MinGW 的編譯器、資源編譯器與依賴必須使用相同架構；不要混用 32 位元 windres 與 64 位元 GCC。
 執行時需保留建置目錄中的相依 DLL、`platforms` 與 `styles` 子目錄，不要只複製 EXE。
 目前沒有提供可攜式發行 ZIP，部署到其他電腦與正式發行仍需另行驗證及整理授權文件。

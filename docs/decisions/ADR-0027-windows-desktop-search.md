@@ -63,3 +63,8 @@ Qt layouts/items transfer ownership directly to their parent/model using the
 returned unique_ptr::release pointer. The lint header exclusion is limited to
 Qt-generated *_autogen directories; handwritten application and test headers
 remain analyzed with the existing checks and warnings-as-errors policy.
+
+CI dependency preparation normalizes the PCRE2 gitlink API response formatting
+but requires its original pinned SHA512 before writing cache; it does not alter
+package versions, hashes, dependency scope or product network behavior. The
+Windows developer environment must retain the explicitly pinned vcpkg root.

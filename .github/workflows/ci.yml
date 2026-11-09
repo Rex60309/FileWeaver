@@ -33,6 +33,7 @@ jobs:
           $installation = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if (-not $installation) { throw 'MSVC not found' }
           & "$installation\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64
+          $env:VCPKG_ROOT = Join-Path $env:GITHUB_WORKSPACE "build/tools/vcpkg"
           Get-ChildItem Env: | ForEach-Object { "$($_.Name)=$($_.Value)" >> $env:GITHUB_ENV }
       - run: cmake --preset debug
       - run: cmake --build --preset debug --parallel
@@ -79,7 +80,10 @@ jobs:
           $installation = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if (-not $installation) { throw 'MSVC not found' }
           & "$installation\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64
+          $env:VCPKG_ROOT = Join-Path $env:GITHUB_WORKSPACE "build/tools/vcpkg"
           Get-ChildItem Env: | ForEach-Object { "$($_.Name)=$($_.Value)" >> $env:GITHUB_ENV }
+      - name: Prepare checksum-verified Qt dependency metadata
+        run: python tools/prepare_qt_download.py
       - run: cmake --preset desktop-debug
       - run: cmake --build --preset desktop-debug --parallel
       - run: ctest --preset desktop-debug --output-on-failure --no-tests=error

@@ -110,3 +110,18 @@ cmake --preset sanitizers -G "Unix Makefiles" -B build/linux/sanitizers -DCMAKE_
 cmake --build build/linux/sanitizers --parallel 4
 ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 ctest --test-dir build/linux/sanitizers --output-on-failure
 ```
+
+## Hosted dependency preparation correction
+
+Initial desktop CI run 42597984128 failed before compilation: GitHub returned
+compact JSON for PCRE2's SLJIT gitlink; its content/commit was identical to the
+pinned cached pretty JSON, but the port hashes the full response bytes.
+Reproduced the exact unexpected digest locally. tools/prepare_qt_download.py
+normalizes JSON formatting and still requires the original port's SHA512 before
+creating the download cache. It refuses changed metadata and unexpected existing
+files. Verified compact response success, idempotent repeat, modified commit
+rejection and preservation of the verified file; live download also passed.
+No dependency versions or hashes changed; no checksum bypass was added.
+Windows CI now restores the pinned VCPKG_ROOT after Visual Studio setup, which
+otherwise replaces it with the runner's bundled vcpkg. A rerun is required before
+claiming hosted desktop success. Both changes affect build preparation only.
