@@ -1,0 +1,6 @@
+{
+  "name": "fileweaver",
+  "version-string": "0.1.0",
+  "builtin-baseline": "ec48c11eae9448c8c6e7739d93e06fa2433aa95f",
+  "dependencies": ["cli11", "sqlite3", "catch2"]
+}

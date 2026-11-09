@@ -1,0 +1,59 @@
+name: quality
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+env:
+  VCPKG_ROOT: ${{ github.workspace }}/build/tools/vcpkg
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: microsoft/vcpkg
+          ref: ec48c11eae9448c8c6e7739d93e06fa2433aa95f
+          path: build/tools/vcpkg
+      - name: Bootstrap vcpkg (Windows)
+        if: runner.os == 'Windows'
+        run: ./build/tools/vcpkg/bootstrap-vcpkg.bat -disableMetrics
+      - name: Bootstrap vcpkg (Linux)
+        if: runner.os == 'Linux'
+        run: ./build/tools/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+      - name: Enable MSVC
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installation = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installation) { throw 'MSVC not found' }
+          & "$installation\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64
+          Get-ChildItem Env: | ForEach-Object { "$($_.Name)=$($_.Value)" >> $env:GITHUB_ENV }
+      - run: cmake --preset debug
+      - run: cmake --build --preset debug --parallel
+      - run: ctest --preset debug --output-on-failure --no-tests=error
+      - run: cmake --preset release
+      - run: cmake --build --preset release --parallel
+      - run: ctest --preset release --output-on-failure --no-tests=error
+  analysis:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: microsoft/vcpkg
+          ref: ec48c11eae9448c8c6e7739d93e06fa2433aa95f
+          path: build/tools/vcpkg
+      - run: ./build/tools/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build clang-format clang-tidy
+      - run: cmake --preset debug
+      - run: cmake --build --preset debug --target format-check
+      - run: cmake --build --preset debug --target lint
+      - run: cmake --preset sanitizers -DCMAKE_CXX_COMPILER=clang++
+      - run: cmake --build --preset sanitizers --parallel
+      - run: ctest --preset sanitizers --output-on-failure --no-tests=error
