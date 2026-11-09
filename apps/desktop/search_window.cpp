@@ -1,5 +1,6 @@
 #include "search_window.hpp"
 #include <QApplication>
+#include <QCheckBox>
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -9,11 +10,13 @@
 #include <QHeaderView>
 #include <QItemSelectionModel>
 #include <QKeyEvent>
+#include <QKeySequenceEdit>
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
 #include <QPushButton>
 #include <QShortcut>
+#include <QSignalBlocker>
 #include <QStandardItemModel>
 #include <QStyle>
 #include <QTreeView>
@@ -43,8 +46,8 @@ QString parentText(const QString &path) {
 }
 } // namespace
 
-SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent)
-    : QWidget(parent), controller_(std::move(search)) {
+SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, HotkeyApi hotkey_api)
+    : QWidget(parent), hotkey_(std::move(hotkey_api)), controller_(std::move(search)) {
     setWindowTitle(QStringLiteral("FileWeaver — 檔名搜尋"));
     setWindowIcon(style()->standardIcon(QStyle::SP_FileDialogContentsView));
     resize(1000, 650);
@@ -89,6 +92,24 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent)
     search_row->addWidget(mode_);
     search_row->addWidget(search_button);
     layout->addLayout(search_row.release());
+    auto hotkey_row = std::make_unique<QHBoxLayout>();
+    hotkey_enabled_ = new QCheckBox(QStringLiteral("啟用全域快捷鍵"), this);
+    hotkey_enabled_->setObjectName(QStringLiteral("hotkeyEnabled"));
+    hotkey_sequence_ = new QKeySequenceEdit(QKeySequence(QStringLiteral("Ctrl+Alt+Space")), this);
+    hotkey_sequence_->setObjectName(QStringLiteral("hotkeySequence"));
+    hotkey_sequence_->setAccessibleName(QStringLiteral("全域快捷鍵組合"));
+    hotkey_sequence_->setMaximumWidth(210);
+    hotkey_row->addWidget(hotkey_enabled_);
+    hotkey_row->addWidget(hotkey_sequence_);
+    hotkey_row->addStretch();
+    layout->addLayout(hotkey_row.release());
+    hotkey_status_ = new QLabel(QStringLiteral("快捷鍵未啟用；設定僅供本次執行使用。"), this);
+    hotkey_status_->setObjectName(QStringLiteral("hotkeyStatus"));
+    hotkey_status_->setTextFormat(Qt::PlainText);
+    hotkey_status_->setWordWrap(true);
+    layout->addWidget(hotkey_status_);
+    connect(hotkey_enabled_, &QCheckBox::toggled, this, &SearchWindow::updateHotkey);
+    connect(&hotkey_, &GlobalHotkey::activated, this, &SearchWindow::activateSearch);
     status_ = new QLabel(QStringLiteral("選擇現有索引後，即可開始搜尋。"), this);
     status_->setObjectName(QStringLiteral("status"));
     status_->setTextFormat(Qt::PlainText);
@@ -155,6 +176,29 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent)
     auto *close_shortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
     connect(close_shortcut, &QShortcut::activated, this, &SearchWindow::close);
     query_->setFocus();
+}
+
+void SearchWindow::updateHotkey(bool enabled) {
+    const auto error =
+        enabled ? hotkey_.enable(hotkey_sequence_->keySequence()) : hotkey_.disable();
+    const QSignalBlocker blocker(hotkey_enabled_);
+    hotkey_enabled_->setChecked(hotkey_.isEnabled());
+    hotkey_sequence_->setEnabled(!hotkey_.isEnabled());
+    hotkey_status_->setText(
+        !error.isEmpty() ? error
+        : hotkey_.isEnabled()
+            ? QStringLiteral("已啟用 %1，按下可切回搜尋欄；修改組合前請先停用。")
+                  .arg(hotkey_sequence_->keySequence().toString(QKeySequence::NativeText))
+            : QStringLiteral("快捷鍵未啟用；設定僅供本次執行使用。"));
+}
+
+void SearchWindow::activateSearch() {
+    setWindowState(windowState() & ~Qt::WindowMinimized);
+    show();
+    raise();
+    activateWindow();
+    query_->setFocus(Qt::ShortcutFocusReason);
+    query_->selectAll();
 }
 
 void SearchWindow::setDatabase(const QString &path) {
@@ -271,6 +315,7 @@ bool SearchWindow::eventFilter(QObject *watched, QEvent *event) {
 void SearchWindow::closeEvent(QCloseEvent *event) {
     debounce_.stop();
     controller_.cancel();
+    updateHotkey(false);
     QWidget::closeEvent(event);
 }
 } // namespace fileweaver::desktop

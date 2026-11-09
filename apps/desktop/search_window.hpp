@@ -1,9 +1,12 @@
 #pragma once
 
+#include "global_hotkey.hpp"
 #include "search_controller.hpp"
 #include <QTimer>
 #include <QWidget>
 
+class QCheckBox;
+class QKeySequenceEdit;
 class QComboBox;
 class QLabel;
 class QLineEdit;
@@ -16,7 +19,7 @@ class SearchWindow final : public QWidget {
     Q_OBJECT
   public:
     explicit SearchWindow(SearchController::Search search = fileweaver::search_files,
-                          QWidget *parent = nullptr);
+                          QWidget *parent = nullptr, HotkeyApi hotkey_api = windowsHotkeyApi());
     void setDatabase(const QString &path);
 
   protected:
@@ -29,6 +32,8 @@ class SearchWindow final : public QWidget {
     void clearResults();
     void showReply(const SearchReply &reply);
     void selectResult();
+    void activateSearch();
+    void updateHotkey(bool enabled);
     void copyPath();
     QString database_;
     // Non-owning pointers: widgets/model are owned immediately by their Qt parent.
@@ -40,6 +45,10 @@ class SearchWindow final : public QWidget {
     QTreeView *results_;
     QStandardItemModel *model_;
     QPushButton *copy_;
+    QCheckBox *hotkey_enabled_;
+    QKeySequenceEdit *hotkey_sequence_;
+    QLabel *hotkey_status_;
+    GlobalHotkey hotkey_;
     QTimer debounce_;
     SearchController controller_;
 };

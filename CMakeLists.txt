@@ -88,22 +88,23 @@ if(FILEWEAVER_BUILD_DESKTOP)
   endif()
   find_package(Qt6 6.3 REQUIRED COMPONENTS Widgets Test)
   find_package(Threads REQUIRED)
-  set(DESKTOP_SOURCES apps/desktop/main.cpp apps/desktop/arguments.cpp apps/desktop/arguments.hpp apps/desktop/search_controller.cpp
+  set(DESKTOP_SOURCES apps/desktop/global_hotkey.cpp apps/desktop/global_hotkey.hpp apps/desktop/main.cpp apps/desktop/arguments.cpp apps/desktop/arguments.hpp apps/desktop/search_controller.cpp
     apps/desktop/search_controller.hpp apps/desktop/search_window.cpp
     apps/desktop/search_window.hpp tests/desktop/search_window_test.cpp)
-  set(DESKTOP_TIDY_SOURCES apps/desktop/main.cpp apps/desktop/arguments.cpp apps/desktop/search_controller.cpp
+  set(DESKTOP_TIDY_SOURCES apps/desktop/global_hotkey.cpp apps/desktop/main.cpp apps/desktop/arguments.cpp apps/desktop/search_controller.cpp
     apps/desktop/search_window.cpp tests/desktop/search_window_test.cpp)
-  add_library(fileweaver_desktop_ui apps/desktop/arguments.cpp apps/desktop/arguments.hpp apps/desktop/search_controller.cpp
+  add_library(fileweaver_desktop_ui apps/desktop/global_hotkey.cpp apps/desktop/global_hotkey.hpp apps/desktop/arguments.cpp apps/desktop/arguments.hpp apps/desktop/search_controller.cpp
     apps/desktop/search_controller.hpp apps/desktop/search_window.cpp apps/desktop/search_window.hpp)
   set_target_properties(fileweaver_desktop_ui PROPERTIES AUTOMOC ON)
   target_include_directories(fileweaver_desktop_ui PUBLIC apps/desktop)
-  target_link_libraries(fileweaver_desktop_ui PUBLIC fileweaver_storage Qt6::Widgets PRIVATE Threads::Threads)
+  target_link_libraries(fileweaver_desktop_ui PUBLIC fileweaver_storage Qt6::Widgets PRIVATE Threads::Threads user32)
   qt_add_executable(fileweaver-desktop WIN32 apps/desktop/main.cpp)
   target_link_libraries(fileweaver-desktop PRIVATE fileweaver_desktop_ui)
   qt_add_executable(desktop_tests tests/desktop/search_window_test.cpp)
   set_target_properties(desktop_tests PROPERTIES AUTOMOC ON WIN32_EXECUTABLE FALSE)
   target_link_libraries(desktop_tests PRIVATE fileweaver_desktop_ui Qt6::Test)
   foreach(desktop_target IN ITEMS fileweaver_desktop_ui fileweaver-desktop desktop_tests)
+    target_compile_definitions(${desktop_target} PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     if(MSVC)
       target_compile_options(${desktop_target} PRIVATE /W4 /WX /permissive- /utf-8)
     else()

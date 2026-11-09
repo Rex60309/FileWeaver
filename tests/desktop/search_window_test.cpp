@@ -4,11 +4,14 @@
 #include "fileweaver/application/inspect.hpp"
 #include "search_controller.hpp"
 #include "search_window.hpp"
+#include <QAbstractEventDispatcher>
 #include <QApplication>
+#include <QCheckBox>
 #include <QClipboard>
 #include <QComboBox>
 #include <QCommandLineParser>
 #include <QDir>
+#include <QKeySequenceEdit>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
@@ -25,7 +28,11 @@
 #include <mutex>
 #include <stdexcept>
 #include <thread>
+#include <windows.h>
 
+using fileweaver::desktop::GlobalHotkey;
+using fileweaver::desktop::HotkeyApi;
+using fileweaver::desktop::HotkeyBinding;
 using fileweaver::desktop::SearchController;
 using fileweaver::desktop::SearchReply;
 using fileweaver::desktop::SearchWindow;
@@ -46,6 +53,170 @@ fileweaver::SearchResult record(const std::string &name) {
 class DesktopTests final : public QObject {
     Q_OBJECT
   private slots:
+    void hotkeyThreadMessageReachesQtDispatcher() {
+        HotkeyBinding binding{};
+        GlobalHotkey hotkey(HotkeyApi{[&](const HotkeyBinding &request) {
+                                          binding = request;
+                                          return ERROR_SUCCESS;
+                                      },
+                                      [](int) { return ERROR_SUCCESS; }});
+        QVERIFY(hotkey.enable(QKeySequence(QStringLiteral("Ctrl+Alt+Space"))).isEmpty());
+        QSignalSpy activated(&hotkey, &GlobalHotkey::activated);
+        const auto parameter = MAKELPARAM(
+            static_cast<WORD>(binding.modifiers & ~static_cast<unsigned int>(MOD_NOREPEAT)),
+            static_cast<WORD>(binding.virtual_key));
+        QVERIFY(PostThreadMessageW(GetCurrentThreadId(), WM_HOTKEY,
+                                   static_cast<WPARAM>(binding.identifier), parameter) != 0);
+        QTRY_COMPARE(activated.count(), 1);
+    }
+
+    void hotkeyValidationMessagesAndCleanup() {
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, (GlobalHotkey{HotkeyApi{}}));
+        int calls = 0;
+        int releases = 0;
+        int captured_id = 0;
+        std::vector<int> released_ids;
+        unsigned int captured_modifiers = 0;
+        unsigned int captured_key = 0;
+        unsigned long registration_error = ERROR_HOTKEY_ALREADY_REGISTERED;
+        unsigned long cleanup_error = ERROR_SUCCESS;
+        HotkeyApi api{[&](const HotkeyBinding &binding) {
+                          ++calls;
+                          captured_id = binding.identifier;
+                          captured_modifiers = binding.modifiers;
+                          captured_key = binding.virtual_key;
+                          return registration_error;
+                      },
+                      [&](int id) {
+                          released_ids.push_back(id);
+                          ++releases;
+                          return cleanup_error;
+                      }};
+        {
+            GlobalHotkey hotkey(api);
+            QVERIFY(!hotkey.isEnabled());
+            QCOMPARE(calls, 0);
+            for (const auto &text :
+                 {"", "F3", "Shift+A", "Meta+Space", "Ctrl+F12", "Ctrl+Left", "Ctrl+A, Ctrl+B"}) {
+                QVERIFY(!hotkey.enable(QKeySequence(QString::fromLatin1(text))).isEmpty());
+            }
+            QCOMPARE(calls, 0);
+            const QKeySequence chord(QStringLiteral("Ctrl+Alt+Space"));
+            QVERIFY(hotkey.enable(chord).contains(QStringLiteral("占用")));
+            QVERIFY(!hotkey.isEnabled());
+            registration_error = ERROR_SUCCESS;
+            QVERIFY(hotkey.enable(chord).isEmpty());
+            QCOMPARE(captured_modifiers,
+                     static_cast<unsigned int>(MOD_CONTROL | MOD_ALT | MOD_NOREPEAT));
+            QCOMPARE(captured_key, static_cast<unsigned int>(VK_SPACE));
+            QVERIFY(!hotkey.enable(chord).isEmpty());
+            QCOMPARE(calls, 2);
+            QSignalSpy activated(&hotkey, &GlobalHotkey::activated);
+            MSG message{};
+            message.message = WM_HOTKEY;
+            message.wParam = static_cast<WPARAM>(captured_id);
+            message.lParam = MAKELPARAM(MOD_CONTROL | MOD_ALT, VK_SPACE);
+            qintptr result = 7;
+            QVERIFY(!hotkey.nativeEventFilter("unrelated_native_event", &message, &result));
+            QVERIFY(!hotkey.nativeEventFilter("windows_dispatcher_MSG", nullptr, &result));
+            message.wParam += 1;
+            QVERIFY(!hotkey.nativeEventFilter("windows_dispatcher_MSG", &message, &result));
+            message.wParam -= 1;
+            message.lParam = MAKELPARAM(MOD_CONTROL, VK_SPACE);
+            QVERIFY(!hotkey.nativeEventFilter("windows_dispatcher_MSG", &message, &result));
+            QCOMPARE(activated.count(), 0);
+            QCOMPARE(result, qintptr{7});
+            message.lParam = MAKELPARAM(MOD_CONTROL | MOD_ALT, VK_SPACE);
+            QVERIFY(hotkey.nativeEventFilter("windows_dispatcher_MSG", &message, &result));
+            QCOMPARE(activated.count(), 1);
+            QCOMPARE(result, qintptr{0});
+            cleanup_error = ERROR_ACCESS_DENIED;
+            QVERIFY(!hotkey.disable().isEmpty());
+            QVERIFY(hotkey.isEnabled());
+            cleanup_error = ERROR_SUCCESS;
+            QVERIFY(hotkey.disable().isEmpty());
+            QVERIFY(!hotkey.isEnabled());
+            QVERIFY(!hotkey.nativeEventFilter("windows_dispatcher_MSG", &message, &result));
+            QCOMPARE(activated.count(), 1);
+            QVERIFY(hotkey.enable(QKeySequence(QStringLiteral("Ctrl+Shift+F24"))).isEmpty());
+            QCOMPARE(captured_key, static_cast<unsigned int>(VK_F24));
+            QCOMPARE(captured_modifiers,
+                     static_cast<unsigned int>(MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT));
+        }
+        QCOMPARE(releases, 3); // Failed disable, successful retry, destructor cleanup.
+        QVERIFY(released_ids == (std::vector<int>{captured_id, captured_id, captured_id}));
+    }
+
+    void hotkeyOptInConflictRetryAndFocus() {
+        int calls = 0;
+        int releases = 0;
+        unsigned long registration_error = ERROR_HOTKEY_ALREADY_REGISTERED;
+        unsigned long cleanup_error = ERROR_SUCCESS;
+        int captured_id = 0;
+        unsigned int captured_modifiers = 0;
+        unsigned int captured_key = 0;
+        HotkeyApi api{[&](const HotkeyBinding &binding) {
+                          ++calls;
+                          captured_id = binding.identifier;
+                          captured_modifiers = binding.modifiers;
+                          captured_key = binding.virtual_key;
+                          return registration_error;
+                      },
+                      [&](int) {
+                          ++releases;
+                          return cleanup_error;
+                      }};
+        SearchWindow window(fileweaver::search_files, nullptr, api);
+        window.show();
+        auto *enabled = control<QCheckBox>(window, "hotkeyEnabled");
+        auto *sequence = control<QKeySequenceEdit>(window, "hotkeySequence");
+        auto *status = control<QLabel>(window, "hotkeyStatus");
+        auto *query = control<QLineEdit>(window, "query");
+        QCOMPARE(calls, 0);
+        QVERIFY(!enabled->isChecked());
+        enabled->setChecked(true);
+        QVERIFY(!enabled->isChecked());
+        QVERIFY(sequence->isEnabled());
+        QVERIFY(status->text().contains(QStringLiteral("占用")));
+        registration_error = ERROR_SUCCESS;
+        enabled->setChecked(true);
+        QVERIFY(enabled->isChecked());
+        QVERIFY(!sequence->isEnabled());
+        query->setText(QStringLiteral("保留的查詢 日本語"));
+        window.showMinimized();
+        QVERIFY(window.isMinimized());
+        MSG message{};
+        message.message = WM_HOTKEY;
+        message.wParam = static_cast<WPARAM>(captured_id);
+        message.lParam = MAKELPARAM(
+            static_cast<WORD>(captured_modifiers & ~static_cast<unsigned int>(MOD_NOREPEAT)),
+            static_cast<WORD>(captured_key));
+        qintptr result = 1;
+        QVERIFY(QAbstractEventDispatcher::instance()->filterNativeEvent("windows_dispatcher_MSG",
+                                                                        &message, &result));
+        QTRY_VERIFY(!window.isMinimized());
+        QTRY_VERIFY(query->hasFocus());
+        QCOMPARE(query->selectedText(), QStringLiteral("保留的查詢 日本語"));
+        QCOMPARE(query->text(), QStringLiteral("保留的查詢 日本語"));
+        cleanup_error = ERROR_ACCESS_DENIED;
+        enabled->setChecked(false);
+        QVERIFY(enabled->isChecked());
+        QVERIFY(!sequence->isEnabled());
+        QVERIFY(status->text().contains(QStringLiteral("無法停用")));
+        cleanup_error = ERROR_SUCCESS;
+        enabled->setChecked(false);
+        QVERIFY(!enabled->isChecked());
+        QVERIFY(sequence->isEnabled());
+        QCOMPARE(releases, 2);
+        window.showNormal();
+        sequence->setKeySequence(QKeySequence(QStringLiteral("Ctrl+Shift+F23")));
+        enabled->setChecked(true);
+        QCOMPARE(calls, 3);
+        window.close();
+        QCOMPARE(releases, 3);
+        QVERIFY(!enabled->isChecked());
+    }
+
     void startupArguments() {
         QCommandLineParser parser;
         fileweaver::desktop::configureArguments(parser);
