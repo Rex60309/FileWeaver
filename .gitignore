@@ -7,3 +7,23 @@ __pycache__/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+
+# SQLite databases and transient journals (including alternate .db names).
+*.sqlite-journal
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+# Local secrets; keep distributable templates visible.
+.env
+.env.*
+!.env.example
+!.env.template
+# Alternate CMake build trees and accidental in-source configuration.
+/build-*/
+/CMakeFiles/
+/CMakeCache.txt
+/cmake_install.cmake
+/CTestTestfile.cmake
+/Testing/
+/compile_commands.json

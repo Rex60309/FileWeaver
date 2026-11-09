@@ -1,7 +1,8 @@
 # FileWeaver
 
 以 C++20 開發的本機檔案搜尋與生產力工具。**Phase 1 — Search Core 已完成實作與驗收**，
-範圍依 SPEC 第 24 節；尚無正式發行版本，Phase 2 圖形介面尚未開始。
+範圍依 SPEC 第 24 節；尚無正式發行版本。Phase 2 已加入可選的 Windows Qt 搜尋視窗，
+支援選擇既有索引、背景搜尋、鍵盤選取與手動複製完整路徑。其餘 Phase 2 功能仍為規劃項目。
 已可將指定目錄的檔案中繼資料寫入 SQLite 並重掃更新；
 已可搜尋仍存在於索引中的檔名，支援精確、子字串與前綴比對。
 
@@ -9,6 +10,7 @@
 
 | 功能          | 目前行為                                                     |
 | ------------- | ------------------------------------------------------------ |
+| Windows 搜尋視窗 | 選擇既有索引，包含文字／檔名開頭／完整檔名比對，最多 100 筆；方向鍵選取及複製路徑 |
 | CLI 使用說明  | 不帶參數、`--help` 或 `-h` 顯示說明                      |
 | SQLite 初始化 | `init --database <路徑>` 建立 schema v3，包含索引與每個根目錄的掃描設定 |
 | 重複初始化    | 檢查既有 schema，保留 settings 資料                          |
@@ -33,9 +35,57 @@
 標記掃描不完整。目前不支援 Windows UNC／裝置／延伸路徑命名空間，也不能保證
 抵擋惡意目錄替換競態。CLI 的 `index` 指令使用這個共用核心；沒有獨立 `scan` 指令。
 
-**尚未實作：**glob／模糊／路徑搜尋、根目錄移除／索引清除指令、Qt GUI、快捷鍵、
+**尚未實作：**glob／模糊／路徑搜尋、根目錄移除／索引清除指令、全域快捷鍵、
 檔案監控與預覽、重複檔案分析、整理與重新命名、剪貼簿歷史、專案啟動器、
 語意搜尋、備份與還原。這些是規劃項目，不能透過目前版本使用。
+
+## Windows 搜尋視窗怎麼使用？
+
+先使用下方 CLI 的 `init`、`index` 建立索引，再執行：
+
+```powershell
+.\build\desktop-release\fileweaver-desktop.exe
+# 或直接指定既有索引
+.\build\desktop-release\fileweaver-desktop.exe --database ".\build\my-index\index.sqlite"
+```
+
+1. 按「選擇索引…」選取既有 `.sqlite` 或 `.db`。
+2. 輸入檔名，選擇包含文字、檔名開頭或完整檔名；輸入稍停後自動搜尋，也可按 Enter／搜尋。
+3. 按 ↓ 進入結果，↑／↓ 選取。「複製完整路徑」或結果區的 Ctrl+C 可複製選取路徑，Esc 關閉視窗。
+
+搜尋使用索引快照，最多顯示 100 筆；比對規則沿用 CLI：完整檔名區分大小寫，
+包含文字／檔名開頭僅忽略 ASCII 大小寫；不做完整 Unicode 大小寫折疊或正規化。輸入或索引改變會取消舊查詢並清除舊結果。
+視窗不會建立索引、重掃來源、開啟檔案或讀取檔案內容，資料變更請先用 CLI 更新索引。
+選擇大型目錄不會觸發掃描。剪貼簿只在你明確按下複製時寫入，不收集歷史。
+
+### 建置視窗（Windows 開發者）
+
+在已設定 C++20、CMake、Ninja、Python 與 vcpkg 的環境執行：
+
+```powershell
+cmake --preset desktop-debug
+cmake --build --preset desktop-debug --parallel
+ctest --preset desktop-debug --output-on-failure
+cmake --build --preset desktop-debug --target format-check
+cmake --build --preset desktop-debug --target lint
+cmake --preset desktop-release
+cmake --build --preset desktop-release --parallel
+ctest --preset desktop-release --output-on-failure
+```
+
+這兩個 preset 開啟 `FILEWEAVER_BUILD_DESKTOP` 與 vcpkg 的 `desktop` feature，
+首次會下載並編譯 Qt 6 Widgets／Test 及其依賴；預設 CLI preset 不需要 Qt。
+MinGW 的編譯器、資源編譯器與依賴必須使用相同架構；不要混用 32 位元 windres 與 64 位元 GCC。
+執行時需保留建置目錄中的相依 DLL、`platforms` 與 `styles` 子目錄，不要只複製 EXE。
+目前沒有提供可攜式發行 ZIP，部署到其他電腦與正式發行仍需另行驗證及整理授權文件。
+驗證範圍與限制見 [Windows 視窗驗證紀錄](docs/desktop-search-verification.md)。
+
+### 哪些檔案會上傳 Git？
+
+原始碼、測試腳本與建置設定保留在 Git；成品、依賴及測試輸出集中在忽略的 `build/`。
+`.gitignore` 另排除其他 `build-*` 目錄、Python 快取、SQLite 資料庫與日誌、`.env` 等本機設定。
+測量報告請輸出至 `build/`，不要把真實檔案清單或私人路徑提交；正式發行成品應透過 GitHub Releases 提供。
+忽略規則不會移除已追蹤檔案，提交前仍需檢查差異。
 
 ## 如何使用（Windows PowerShell）
 
@@ -61,7 +111,7 @@ Windows 原生主控台直接使用 Unicode API，不修改系統或主控台編
 請提供該錯誤行協助定位（私人路徑可遮掉），不需先刪除資料庫。
 
 先切換到專案根目錄。若已完成建置，可直接執行以下指令；若找不到執行檔，
-請先依下方 Build and verify 完成建置。現在沒有安裝程式或桌面視窗。
+請先依下方 Build and verify 完成建置。目前沒有安裝程式；可選桌面視窗的建置與操作方式見上節。
 
 ### 1. 查看說明
 

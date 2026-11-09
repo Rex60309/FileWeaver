@@ -12,6 +12,7 @@ file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/benchmark-build-info-$<CONFIG>.json" C
   "{\"build_type\":\"$<CONFIG>\",\"compiler_id\":\"${CMAKE_CXX_COMPILER_ID}\",\"compiler_version\":\"${CMAKE_CXX_COMPILER_VERSION}\",\"cxx_standard\":20,\"cmake_version\":\"${CMAKE_VERSION}\",\"system\":\"${CMAKE_SYSTEM_NAME}\",\"architecture\":\"${CMAKE_SYSTEM_PROCESSOR}\"}\n")
 
 option(FILEWEAVER_SANITIZERS "Enable address and undefined behavior sanitizers" OFF)
+option(FILEWEAVER_BUILD_DESKTOP "Build opt-in Windows Qt search window" OFF)
 find_package(CLI11 CONFIG REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(Catch2 3 CONFIG REQUIRED)
@@ -79,6 +80,71 @@ add_test(NAME storage COMMAND storage_tests)
 add_test(NAME cli-contract COMMAND "${CMAKE_COMMAND}"
   "-DCLI=$<TARGET_FILE:fileweaver>" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/cli.cmake")
 
+set(DESKTOP_SOURCES)
+set(DESKTOP_TIDY_SOURCES)
+if(FILEWEAVER_BUILD_DESKTOP)
+  if(NOT WIN32)
+    message(FATAL_ERROR "This desktop milestone is Windows-only; the CLI remains portable")
+  endif()
+  find_package(Qt6 6.3 REQUIRED COMPONENTS Widgets Test)
+  find_package(Threads REQUIRED)
+  set(DESKTOP_SOURCES apps/desktop/main.cpp apps/desktop/arguments.cpp apps/desktop/arguments.hpp apps/desktop/search_controller.cpp
+    apps/desktop/search_controller.hpp apps/desktop/search_window.cpp
+    apps/desktop/search_window.hpp tests/desktop/search_window_test.cpp)
+  set(DESKTOP_TIDY_SOURCES apps/desktop/main.cpp apps/desktop/arguments.cpp apps/desktop/search_controller.cpp
+    apps/desktop/search_window.cpp tests/desktop/search_window_test.cpp)
+  add_library(fileweaver_desktop_ui apps/desktop/arguments.cpp apps/desktop/arguments.hpp apps/desktop/search_controller.cpp
+    apps/desktop/search_controller.hpp apps/desktop/search_window.cpp apps/desktop/search_window.hpp)
+  set_target_properties(fileweaver_desktop_ui PROPERTIES AUTOMOC ON)
+  target_include_directories(fileweaver_desktop_ui PUBLIC apps/desktop)
+  target_link_libraries(fileweaver_desktop_ui PUBLIC fileweaver_storage Qt6::Widgets PRIVATE Threads::Threads)
+  qt_add_executable(fileweaver-desktop WIN32 apps/desktop/main.cpp)
+  target_link_libraries(fileweaver-desktop PRIVATE fileweaver_desktop_ui)
+  qt_add_executable(desktop_tests tests/desktop/search_window_test.cpp)
+  set_target_properties(desktop_tests PROPERTIES AUTOMOC ON WIN32_EXECUTABLE FALSE)
+  target_link_libraries(desktop_tests PRIVATE fileweaver_desktop_ui Qt6::Test)
+  foreach(desktop_target IN ITEMS fileweaver_desktop_ui fileweaver-desktop desktop_tests)
+    if(MSVC)
+      target_compile_options(${desktop_target} PRIVATE /W4 /WX /permissive- /utf-8)
+    else()
+      target_compile_options(${desktop_target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+  endforeach()
+  foreach(plugin_pair IN ITEMS "fileweaver-desktop,QWindowsIntegrationPlugin" "desktop_tests,QMinimalIntegrationPlugin")
+    string(REPLACE "," ";" plugin_parts "${plugin_pair}")
+    list(GET plugin_parts 0 executable_target)
+    list(GET plugin_parts 1 plugin_target)
+    if(NOT TARGET Qt6::${plugin_target})
+      message(FATAL_ERROR "Required Qt platform plugin missing: ${plugin_target}")
+    endif()
+    add_custom_command(TARGET ${executable_target} POST_BUILD
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:${executable_target}>/platforms"
+      COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:Qt6::${plugin_target}>"
+        "$<TARGET_FILE_DIR:${executable_target}>/platforms" VERBATIM)
+  endforeach()
+  if(TARGET Qt6::QModernWindowsStylePlugin)
+    add_custom_command(TARGET fileweaver-desktop POST_BUILD
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:fileweaver-desktop>/styles"
+      COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:Qt6::QModernWindowsStylePlugin>"
+        "$<TARGET_FILE_DIR:fileweaver-desktop>/styles" VERBATIM)
+  endif()
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    get_filename_component(compiler_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    foreach(runtime IN ITEMS libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll)
+      if(EXISTS "${compiler_bin}/${runtime}")
+        foreach(executable_target IN ITEMS fileweaver-desktop desktop_tests)
+          add_custom_command(TARGET ${executable_target} POST_BUILD COMMAND "${CMAKE_COMMAND}" -E
+            copy_if_different "${compiler_bin}/${runtime}" "$<TARGET_FILE_DIR:${executable_target}>" VERBATIM)
+        endforeach()
+      endif()
+    endforeach()
+  endif()
+  add_test(NAME desktop-interaction COMMAND "${CMAKE_COMMAND}"
+    "-DTEST_EXECUTABLE=$<TARGET_FILE:desktop_tests>" "-DRESULT_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/desktop/run_qt_test.cmake")
+  set_tests_properties(desktop-interaction PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=minimal" TIMEOUT 60)
+endif()
+
 set(PROJECT_SOURCES apps/cli/main.cpp apps/cli/output.hpp apps/cli/windows_io.hpp benchmarks/search/core_search.cpp benchmarks/search/process_memory.hpp src/database/initialize.cpp tests/integration/storage.cpp
   src/core/utc_time.cpp include/fileweaver/core/utc_time.hpp
   include/fileweaver/application/index.hpp
@@ -86,8 +152,9 @@ set(PROJECT_SOURCES apps/cli/main.cpp apps/cli/output.hpp apps/cli/windows_io.hp
   include/fileweaver/application/refresh.hpp
   include/fileweaver/application/search.hpp
   src/filesystem/scan.cpp include/fileweaver/filesystem/scan.hpp
-  include/fileweaver/application/initialize.hpp include/fileweaver/core/storage_error.hpp)
+  include/fileweaver/application/initialize.hpp include/fileweaver/core/storage_error.hpp ${DESKTOP_SOURCES})
 list(TRANSFORM PROJECT_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
+list(TRANSFORM DESKTOP_TIDY_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 find_program(CLANG_FORMAT clang-format HINTS "${CMAKE_SOURCE_DIR}/build/tools/python/clang_format/data/bin")
 find_program(CLANG_TIDY clang-tidy HINTS "${CMAKE_SOURCE_DIR}/build/tools/python/clang_tidy/data/bin")
 if(CLANG_FORMAT)
@@ -116,7 +183,7 @@ if(CLANG_TIDY)
     "${CMAKE_CURRENT_SOURCE_DIR}/src/database/initialize.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/core/utc_time.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/filesystem/scan.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/storage.cpp" ${TIDY_PLATFORM_ARGS} --warnings-as-errors=* VERBATIM)
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/storage.cpp" ${DESKTOP_TIDY_SOURCES} ${TIDY_PLATFORM_ARGS} --warnings-as-errors=* VERBATIM)
 else()
   add_custom_target(lint COMMAND "${CMAKE_COMMAND}" -E echo "clang-tidy is required"
     COMMAND "${CMAKE_COMMAND}" -E false)

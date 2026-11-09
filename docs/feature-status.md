@@ -5,7 +5,8 @@ No features are released. In Progress does not imply build or test acceptance.
 Phase 1 (PRODUCT_SPEC section 24) implementation and acceptance completed on
 2026-11-09. [Acceptance ledger](phase1-acceptance.md) records the verified source
 revision, executed CI, benchmark scope and remaining whole-product limitations.
-Phase 2 and later remain planned; this is not a formal release.
+The selected Phase 2 Windows search window is tested locally; the rest of Phase 2
+and later phases remain planned. This is not a formal release.
 
 | Phase | Feature | Status |
 | --- | --- | --- |
@@ -41,7 +42,8 @@ Phase 2 and later remain planned; this is not a formal release.
 | 1 | Available Windows creation time, NULL backfill and overflow-safe conversion | Tested |
 | Future | Controlled cold-cache/specialized-index benchmarks and cross-platform CLI memory | Planned |
 | Future | Additional search modes/filters and root management commands beyond Phase 1 deliverables | Planned |
-| 2 | Qt, hotkey, fuzzy search, watchers, safe preview | Planned |
+| 2 | Opt-in Windows Qt index chooser/search window, bounded async worker, keyboard selection and explicit path copy | Tested |
+| 2 | Global hotkey, file opening, fuzzy ranking, watchers and safe preview | Planned |
 | 3 | Analysis, duplicates, organizer, rename, journal | Planned |
 | 4 | Project launcher, opt-in clipboard, activity | Planned |
 | 5 | Opt-in semantic search, backup and restore | Planned |

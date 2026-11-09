@@ -1,3 +1,6 @@
 Checks: 'clang-analyzer-*,bugprone-*,performance-*'
 WarningsAsErrors: '*'
 HeaderFilterRegex: '[/\\](include|src|apps|tests)[/\\]'
+
+# Qt moc output is generated, not project source; handwritten headers stay checked.
+ExcludeHeaderFilterRegex: '[/\\][^/\\]*_autogen[/\\]'
