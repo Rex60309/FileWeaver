@@ -108,6 +108,9 @@ After the scoped-CWD correction, local Windows Debug/Release each pass 11 groups
 storage 63 cases / 802 assertions; format/lint pass. Rebuilt Linux sanitizer
 storage passes 61 cases / 770 assertions. Application binary SHA-256 still equals
 the 4f1a1ba benchmark's f6d20cab... value; this change affects tests only.
+The sanitizer test preset now carries the same explicit leak-detection and
+halt-on-error environment as the executed local gate, so hosted Clang tests do
+not rely on runtime defaults or recover after a UBSan report. No checks disabled.
 
 - Hosted CI has not yet completed. A Release test preset and Release CI test step
   were added; MSVC explicitly compiles project sources as UTF-8.

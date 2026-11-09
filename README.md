@@ -617,6 +617,8 @@ there separately from local checks. See docs/verification.md for command details
 For matching analysis-tool versions, install
 `python -m pip install --target build/tools/python -r tools/requirements-analysis.txt`.
 These developer tools are separate from product runtime dependencies.
+The sanitizer test preset enables leak detection and stops on ASan/UBSan errors;
+it is intended for the supported Linux/macOS compiler configurations.
 
 Indexing reads metadata only from explicitly selected roots. There is no source-file
 mutation, content collection, telemetry, or runtime network activity. Storage writes

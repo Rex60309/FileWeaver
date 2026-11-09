@@ -13,6 +13,6 @@
   "testPresets": [
     {"name": "debug", "configurePreset": "debug", "output": {"outputOnFailure": true}},
     {"name": "release", "configurePreset": "release", "output": {"outputOnFailure": true}},
-    {"name": "sanitizers", "configurePreset": "sanitizers", "output": {"outputOnFailure": true}}
+    {"name": "sanitizers", "configurePreset": "sanitizers", "environment": {"ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1", "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1"}, "output": {"outputOnFailure": true}}
   ]
 }
