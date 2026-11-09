@@ -14,6 +14,7 @@
 #include <optional>
 #include <sqlite3.h>
 #include <string>
+#include <system_error>
 #include <type_traits>
 
 #ifdef _WIN32
@@ -85,8 +86,15 @@ std::string utf8(const std::filesystem::path &path) {
     try {
         const auto value = path.generic_u8string();
         return {value.begin(), value.end()};
-    } catch (const std::filesystem::filesystem_error &error) {
-        if (error.code() != std::errc::illegal_byte_sequence) {
+    } catch (const std::system_error &error) {
+        bool conversion_failed = error.code() == std::errc::illegal_byte_sequence;
+#ifdef _WIN32
+        conversion_failed =
+            conversion_failed ||
+            error.code() == std::error_code(static_cast<int>(ERROR_NO_UNICODE_TRANSLATION),
+                                            std::system_category());
+#endif
+        if (!conversion_failed) {
             throw;
         }
         // Never attempt another encoding conversion while reporting this failure.

@@ -140,6 +140,8 @@ Indexed files=1 added=1 updated=0 missing=0 skipped=0 errors=0 status=completed
 資料庫。取消目前提供給 C++ 呼叫端，CLI 尚未提供優雅的 Ctrl+C 取消處理。
 重新命名以「新路徑＋舊路徑 Missing」表示；不讀取或比對檔案內容。
 索引路徑目前採大小寫精確比對，大小寫不同的根目錄寫法可能形成不同根目錄。
+`--root` 請使用 `roots` 列出的登錄路徑；Windows 短路徑或其他別名不保證匹配。
+搜尋不會為了解析別名而存取來源磁碟，來源離線時仍可查詢索引。
 
 ### 5. 搜尋已索引的檔名
 

@@ -51,7 +51,7 @@ def execute(database, statement, parameters=()):
 
 
 with tempfile.TemporaryDirectory(prefix="fileweaver-json-") as temporary:
-    workspace = Path(temporary)
+    workspace = Path(temporary).resolve()
     source = workspace / "資料 source"
     source.mkdir()
     selected = source / "quote ' %_ 文.txt"

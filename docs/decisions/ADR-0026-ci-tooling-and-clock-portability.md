@@ -40,3 +40,20 @@ push the focused fixes and require hosted MSVC/GCC/Clang jobs to actually pass.
 No sanitizer, format or lint check is skipped. Pinned-tool installation uses
 development network access only in explicitly authorized CI/developer setup;
 FileWeaver has no runtime network behavior.
+
+## Follow-up from the second hosted run
+
+b00e72b passed hosted Ubuntu Debug/Release and the complete Clang analysis/
+sanitizer job. Hosted MSVC compiled but exposed native path assumptions:
+conversion can throw system_error with ERROR_NO_UNICODE_TRANSLATION rather than
+filesystem_error/EILSEQ. Catch the common system_error base, recognize only the
+two encoding-failure codes and keep the existing escaped-native diagnostic.
+Unrelated system errors still propagate. Existing malformed-name rollback tests
+are retained, not weakened or quarantined.
+
+Root-filter tests had assumed the temporary directory spelling was already the
+canonical registered spelling. Resolve only the newly created private test
+workspace in C++/Python before generating fixtures. Keep all root membership,
+offline search and cancellation assertions. Product root filtering remains
+lexical/read-only as ADR-0007 requires; do not introduce live canonicalization or
+alias matching into search to satisfy a test fixture assumption.

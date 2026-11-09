@@ -91,6 +91,13 @@ the focused fixes. After them, Windows Debug/Release again pass 11 groups each,
 format/lint pass, and applicable rebuilt Linux ASan/UBSan storage plus independent
 UTC/filter matrix pass 2/2 groups. Hosted retry remains required.
 
+Second run [42562349853](https://github.com/Rex60309/FileWeaver/actions/runs/42562349853)
+on b00e72b passed hosted Ubuntu Debug/Release and Clang format/lint/ASan/UBSan.
+MSVC compiled but failed canonical-test-workspace assumptions and malformed-path
+diagnostic handling. ADR-0026 records the follow-up. No product alias-matching
+contract was changed. After those fixes, local Windows Debug/Release, format/lint
+and rebuilt Linux ASan/UBSan storage/Unicode/JSON tests pass (3/3 selected groups).
+
 - Hosted CI has not yet completed. A Release test preset and Release CI test step
   were added; MSVC explicitly compiles project sources as UTF-8.
 - Linux final Debug/Release and ASan/UBSan pass; actual Git clean-checkout

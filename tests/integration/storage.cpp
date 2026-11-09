@@ -42,6 +42,7 @@ class Fixture {
             directory = std::filesystem::temp_directory_path() /
                         ("fileweaver-test-" + std::to_string(random()));
             if (std::filesystem::create_directory(directory)) {
+                directory = std::filesystem::canonical(directory);
                 return;
             }
         }
