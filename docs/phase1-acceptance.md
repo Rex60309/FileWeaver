@@ -98,6 +98,17 @@ diagnostic handling. ADR-0026 records the follow-up. No product alias-matching
 contract was changed. After those fixes, local Windows Debug/Release, format/lint
 and rebuilt Linux ASan/UBSan storage/Unicode/JSON tests pass (3/3 selected groups).
 
+Third run [42563423917](https://github.com/Rex60309/FileWeaver/actions/runs/42563423917)
+on 4f1a1ba passed hosted Linux/Clang jobs and Windows JSON/Unicode/creation-time
+coverage. Only a unit-test cross-drive relative-path assumption remained; it is
+corrected with scoped test CWD and a restoration assertion. Product code is
+unchanged by that final test-harness correction. All previous failures remain
+recorded rather than silently rerun as presumed transient errors.
+After the scoped-CWD correction, local Windows Debug/Release each pass 11 groups,
+storage 63 cases / 802 assertions; format/lint pass. Rebuilt Linux sanitizer
+storage passes 61 cases / 770 assertions. Application binary SHA-256 still equals
+the 4f1a1ba benchmark's f6d20cab... value; this change affects tests only.
+
 - Hosted CI has not yet completed. A Release test preset and Release CI test step
   were added; MSVC explicitly compiles project sources as UTF-8.
 - Linux final Debug/Release and ASan/UBSan pass; actual Git clean-checkout

@@ -9,6 +9,7 @@
 #include "output.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -56,6 +57,28 @@ class Fixture {
     Fixture &operator=(const Fixture &) = delete;
     std::filesystem::path directory;
     [[nodiscard]] std::filesystem::path path() const { return directory / "index.sqlite"; }
+};
+
+// Catch runs these cases serially in their own test process. Restore CWD even
+// when an assertion throws, rather than depending on the runner's drive/layout.
+class ScopedCurrentDirectory {
+  public:
+    explicit ScopedCurrentDirectory(const std::filesystem::path &selected)
+        : previous(std::filesystem::current_path()) {
+        std::filesystem::current_path(selected);
+    }
+    ~ScopedCurrentDirectory() {
+        std::error_code error;
+        std::filesystem::current_path(previous, error);
+        if (error) {
+            std::terminate(); // Cannot safely continue tests with an unrestored environment.
+        }
+    }
+    ScopedCurrentDirectory(const ScopedCurrentDirectory &) = delete;
+    ScopedCurrentDirectory &operator=(const ScopedCurrentDirectory &) = delete;
+
+  private:
+    std::filesystem::path previous;
 };
 
 const fileweaver::IndexSummary &require_index(const fileweaver::RefreshRootResult &root) {
@@ -1153,11 +1176,16 @@ TEST_CASE("Search root filter selects exact registered membership without requir
     REQUIRE(results[0].display_path.find("/first/") != std::string::npos);
     request.filters.root = fixture.directory;
     REQUIRE(fileweaver::search_files(request).empty());
-    request.filters.root = std::filesystem::relative(second);
-    REQUIRE(fileweaver::search_files(request).size() == 1);
-    std::filesystem::remove(second / "data.txt");
-    std::filesystem::remove(second);
-    REQUIRE(fileweaver::search_files(request).size() == 1);
+    const auto original_directory = std::filesystem::current_path();
+    {
+        const ScopedCurrentDirectory selected(fixture.directory);
+        request.filters.root = std::filesystem::path("second");
+        REQUIRE(fileweaver::search_files(request).size() == 1);
+        std::filesystem::remove(second / "data.txt");
+        std::filesystem::remove(second);
+        REQUIRE(fileweaver::search_files(request).size() == 1);
+    }
+    REQUIRE(std::filesystem::current_path() == original_directory);
     request.filters.root = fixture.directory / "unregistered";
     REQUIRE(fileweaver::search_files(request).empty());
 }

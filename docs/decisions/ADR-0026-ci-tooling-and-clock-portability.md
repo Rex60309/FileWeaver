@@ -57,3 +57,11 @@ workspace in C++/Python before generating fixtures. Keep all root membership,
 offline search and cancellation assertions. Product root filtering remains
 lexical/read-only as ADR-0007 requires; do not introduce live canonicalization or
 alias matching into search to satisfy a test fixture assumption.
+
+The third hosted run on 4f1a1ba passed every Windows group except one remaining
+relative-root unit assertion: deriving a relative path between the runner's D:
+working directory and C: temporary root produced an empty path. Keep the relative
+and offline assertions, but set CWD to the owned temporary workspace using a
+test-only RAII guard for that scope. Restore CWD on assertion exceptions and
+assert it was restored afterward. Tests run serially within this separate test
+process; no production process-global state or filesystem contract changes.
