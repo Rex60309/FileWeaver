@@ -2,13 +2,18 @@
 
 No features are released. In Progress does not imply build or test acceptance.
 
+Phase 1 (PRODUCT_SPEC section 24) implementation and acceptance completed on
+2026-11-09. [Acceptance ledger](phase1-acceptance.md) records the verified source
+revision, executed CI, benchmark scope and remaining whole-product limitations.
+Phase 2 and later remain planned; this is not a formal release.
+
 | Phase | Feature | Status |
 | --- | --- | --- |
 | 0 | Git, C++20 build presets, CLI help and contract tests | Tested |
 | 0 | Format and lint gates (Windows GCC 13.2) | Tested |
 | 0 | Pinned vcpkg, SQLite initialization, Catch2 integration tests | Tested |
 | 0 | Architecture and schema ADRs | Tested |
-| 0 | Hosted Windows/Linux CI (execution pending) | In Progress |
+| 0 | Hosted Windows/MSVC and Ubuntu/GCC Debug/Release, Clang format/lint/ASan/UBSan | Tested |
 | 0 | Ubuntu WSL2 GCC Debug/Release and combined ASan/UBSan execution | Tested |
 | 1 | Streaming metadata scanner library, exclusions, cancellation and junction protection | Tested |
 | 1 | Schema v2 roots/files/scans, v1 upgrade, rollback and constraints | Tested |

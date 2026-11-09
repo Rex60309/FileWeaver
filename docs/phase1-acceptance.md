@@ -5,6 +5,33 @@ gates; not Phase 2 GUI/watchers/fuzzy ranking or later file-changing capabilitie
 This ledger distinguishes implemented behavior, executed evidence and open gates.
 It is not a release announcement.
 
+**Result: Phase 1 completed and accepted.** Verified implementation/test/preset
+revision: `c9cd8fead9bdd9551fe4e5ef146579db0139dbf8`.
+[Successful hosted run 42564387945](https://github.com/Rex60309/FileWeaver/actions/runs/42564387945).
+Documentation-only completion updates do not change that validated code/config.
+
+| SPEC section 24 acceptance point | Result / evidence |
+| --- | --- |
+| Index 100000 test files | Passed; independently generated nested Unicode fixture and index counts |
+| Correct search results | Passed; independent CLI/native/SQLite/filesystem oracles, filter/lifecycle matrices and error contracts |
+| Rescan updates and Missing reconciliation | Passed; creation/update/rename/deletion/reappearance, rollback/recovery and conservative exclusions |
+| Reproducible benchmark | Passed; committed driver/fixture generation, commands, environment, raw observations and hashes in linked reports |
+
+| Final hosted gate | Observed result |
+| --- | --- |
+| Windows 2022, MSVC 19.44.35229.0 Debug | 11/11 groups passed |
+| Windows 2022, MSVC 19.44.35229.0 Release | 11/11 groups passed |
+| Ubuntu 24.04, GCC 13.3.0 Debug | 11/11 groups passed |
+| Ubuntu 24.04, GCC 13.3.0 Release | 11/11 groups passed |
+| Ubuntu Clang 18.1.3 ASan/UBSan, strict preset environment | 11/11 groups passed |
+| clang-format 23.1.5 / clang-tidy 23.1.4 | Both gates passed |
+
+The hosted jobs use fresh Git checkouts and the pinned vcpkg baseline. Actual job
+logs were read and their successful configure/build/test/analysis steps checked,
+not merely inferred from workflow configuration. Local Windows storage totals are
+63 cases / 802 assertions; local Linux storage totals are 61 cases / 770 assertions.
+Platform-specific branches explain the difference; no test quarantine was added.
+
 | Phase 1 deliverable | Implementation / evidence |
 | --- | --- |
 | File scanner | Explicit roots, streaming regular-file metadata, exclusions, bounded depth, Unicode, no default link traversal |
@@ -81,7 +108,7 @@ Debug/Release use the corresponding repository preset, binary directory and
 CTest directory. Unix Makefiles is a generator override because this distro has
 make rather than Ninja. This does not change repository preset defaults.
 
-## Open acceptance items
+## Acceptance history (initial failures retained)
 
 Hosted run [42561449394](https://github.com/Rex60309/FileWeaver/actions/runs/42561449394)
 on e2a68e0 passed Ubuntu Debug/Release but failed the analysis formatter-version
@@ -89,7 +116,7 @@ mismatch and MSVC file-clock compilation. These failures are retained, not label
 passes. [ADR-0026](decisions/ADR-0026-ci-tooling-and-clock-portability.md) records
 the focused fixes. After them, Windows Debug/Release again pass 11 groups each,
 format/lint pass, and applicable rebuilt Linux ASan/UBSan storage plus independent
-UTC/filter matrix pass 2/2 groups. Hosted retry remains required.
+UTC/filter matrix passed 2/2 groups. At that stage a hosted retry was required.
 
 Second run [42562349853](https://github.com/Rex60309/FileWeaver/actions/runs/42562349853)
 on b00e72b passed hosted Ubuntu Debug/Release and Clang format/lint/ASan/UBSan.
@@ -112,8 +139,8 @@ The sanitizer test preset now carries the same explicit leak-detection and
 halt-on-error environment as the executed local gate, so hosted Clang tests do
 not rely on runtime defaults or recover after a UBSan report. No checks disabled.
 
-- Hosted CI has not yet completed. A Release test preset and Release CI test step
-  were added; MSVC explicitly compiles project sources as UTF-8.
+- Hosted CI has now completed successfully on the verified revision above.
+  Release tests run as well as builds; MSVC explicitly compiles sources as UTF-8.
 - Linux final Debug/Release and ASan/UBSan pass; actual Git clean-checkout
   Release build/test also passes, as recorded above.
 - SPEC 3.2 creation-time gap was explicitly approved and implemented for Windows:
@@ -125,9 +152,21 @@ not rely on runtime defaults or recover after a UBSan report. No checks disabled
   claim them. Phase 1's explicit four acceptance points have local evidence;
   whole-product performance/architecture aspirations are not all Phase 1 features.
 
-Current-binary 100k-file benchmark: [2026-11-09 measurements](performance/phase1-100k-20261109.md).
+100k-file benchmark observations: [2026-11-09 measurements](performance/phase1-100k-20261109.md).
 All 168 timing samples and six CLI memory observations are correct. Raw fixture,
 report and binaries remain ignored. No controlled cold-cache claim is made.
+
+## Completion boundary
+
+No selected Phase 1 implementation or mandatory quality gate remains open.
+This does not accept all phases of the product or declare a packaged release.
+Phase 2 Qt/hotkey/fuzzy/watcher/preview work has not started. Controlled cold-cache,
+specialized substring-index comparisons, larger-scale datasets and broad hardware
+performance remain future measurements, not silently claimed Phase 1 results.
+
+The implemented application code is unchanged after 4f1a1ba; later commits fix
+only test isolation and sanitizer test environment. The final 100k report's binary
+hash was rechecked against the local Release executable after those changes.
 
 User source files remain read-only. No clipboard/content collection, file
 management, telemetry or product network behavior was added. GitHub access is

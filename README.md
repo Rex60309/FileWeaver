@@ -1,7 +1,8 @@
 # FileWeaver
 
-以 C++20 開發的本機檔案搜尋與生產力工具。目前正在開發 **Phase 1 — Search Core**，
-尚無正式發行版本。已可將指定目錄的檔案中繼資料寫入 SQLite 並重掃更新；
+以 C++20 開發的本機檔案搜尋與生產力工具。**Phase 1 — Search Core 已完成實作與驗收**，
+範圍依 SPEC 第 24 節；尚無正式發行版本，Phase 2 圖形介面尚未開始。
+已可將指定目錄的檔案中繼資料寫入 SQLite 並重掃更新；
 已可搜尋仍存在於索引中的檔名，支援精確、子字串與前綴比對。
 
 ## 目前有哪些功能？
@@ -371,7 +372,7 @@ python benchmarks/search/benchmark_search.py --cli build/release/fileweaver.exe 
 
 啟用核心工具時，報告的 `core_memory` 另列量測前後的程序記憶體峰值、位元組單位、
 來源與可用狀態；`core_peak_rss_bytes` 保存工作完成時取得的峰值。Windows 使用程序
-工作集峰值，Linux 實作讀取程序 RSS 峰值（Linux 執行驗證待 CI）；其他平台、API 失敗
+工作集峰值，Linux 實作讀取程序 RSS 峰值（已通過 Linux 合成 smoke 測試）；其他平台、API 失敗
 或舊工具未提供欄位時保留 null 並附狀態。沒有 `--core-runner` 時核心記憶體欄位為 null。
 這是程序生命週期截至搜尋與驗證完成的高水位，包含啟動、參數、結果核對與量測資料；
 不包含之後的報告序列化或結束階段，不能把前後差值當成單次搜尋配置量或記憶體洩漏。
@@ -548,8 +549,10 @@ PowerShell 可用 `$LASTEXITCODE` 查看上一個程式的退出碼。
 WAL 與外鍵設定，拒絕不支援的版本。
 
 本機 Windows GCC 13.2 的 Debug／Release 建置、CTest、format 與 lint 已通過。
-GitHub Actions 與 Linux sanitizer 只有設定，尚未實際執行；尚未完成跨平台驗收。
-目前沒有正式發行版本；效能數據限單機合成基準，尚非完整 SPEC 驗收。詳見 [功能狀態](docs/feature-status.md) 與
+GitHub Actions 的 Windows/MSVC、Ubuntu/GCC Debug／Release，以及 Clang 的
+format／lint／ASan／UBSan 已全部通過。[成功 CI](https://github.com/Rex60309/FileWeaver/actions/runs/42564387945)
+與各提交的失敗、修正及本機指令見 [Phase 1 驗收紀錄](docs/phase1-acceptance.md)。
+目前沒有正式發行版本；效能數據限單機合成基準，不代表所有硬體或整份產品 SPEC 均已驗收。詳見 [功能狀態](docs/feature-status.md) 與
 [驗證紀錄](docs/verification.md)。完整規劃請見 [產品規格](PRODUCT_SPEC.md)。
 本次索引與回歸測試的命令及結果見 [索引驗證紀錄](docs/index-writer-verification.md)。
 檔名搜尋與 CLI 輸出的命令及結果見 [搜尋驗證紀錄](docs/search-verification.md)。
