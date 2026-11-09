@@ -4,6 +4,8 @@
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
 #include <QHBoxLayout>
@@ -14,6 +16,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QShortcut>
 #include <QSignalBlocker>
@@ -46,8 +49,10 @@ QString parentText(const QString &path) {
 }
 } // namespace
 
-SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, HotkeyApi hotkey_api)
-    : QWidget(parent), hotkey_(std::move(hotkey_api)), controller_(std::move(search)) {
+SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, HotkeyApi hotkey_api,
+                           FileOpenController::Open open_file)
+    : QWidget(parent), hotkey_(std::move(hotkey_api)), controller_(std::move(search)),
+      opener_(std::move(open_file)) {
     setWindowTitle(QStringLiteral("FileWeaver — 檔名搜尋"));
     setWindowIcon(style()->standardIcon(QStyle::SP_FileDialogContentsView));
     resize(1000, 650);
@@ -129,6 +134,7 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     model_->setHorizontalHeaderLabels(
         {QStringLiteral("檔名"), QStringLiteral("所在位置"), QStringLiteral("大小")});
     results_->setModel(model_);
+    results_->installEventFilter(this);
     results_->setColumnWidth(0, 285);
     results_->setColumnWidth(1, 460);
     results_->header()->setStretchLastSection(true);
@@ -142,11 +148,16 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     copy_ = new QPushButton(QStringLiteral("複製完整路徑"), this);
     copy_->setObjectName(QStringLiteral("copyPath"));
     copy_->setEnabled(false);
+    open_ = new QPushButton(QStringLiteral("開啟檔案…"), this);
+    open_->setObjectName(QStringLiteral("openFile"));
+    open_->setEnabled(false);
     selection_row->addWidget(selected_path_, 1);
+    selection_row->addWidget(open_);
     selection_row->addWidget(copy_);
     layout->addLayout(selection_row.release());
-    layout->addWidget(
-        new QLabel(QStringLiteral("↓ 進入結果 · ↑ ↓ 選取 · Ctrl+C 複製路徑 · Esc 關閉"), this));
+    layout->addWidget(new QLabel(
+        QStringLiteral("↓ 進入結果 · ↑ ↓ 選取 · Enter 開啟確認 · Ctrl+C 複製路徑 · Esc 關閉"),
+        this));
     auto *note =
         new QLabel(QStringLiteral("結果來自索引；檔案變更後請更新索引。最多顯示 100 筆。"), this);
     note->setWordWrap(true);
@@ -159,6 +170,12 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     connect(query_, &QLineEdit::returnPressed, this, &SearchWindow::searchNow);
     connect(search_button, &QPushButton::clicked, this, &SearchWindow::searchNow);
     connect(copy_, &QPushButton::clicked, this, &SearchWindow::copyPath);
+    connect(open_, &QPushButton::clicked, this, &SearchWindow::requestOpenSelected);
+    connect(results_, &QTreeView::doubleClicked, this, [this] { requestOpenSelected(); });
+    connect(&opener_, &FileOpenController::completed, this, [this](const OpenReply &reply) {
+        status_->setText(QStringLiteral("上次開啟請求：") + preview(reply.message, 512));
+        selectResult();
+    });
     connect(choose, &QPushButton::clicked, this, [this] {
         const auto selected = QFileDialog::getOpenFileName(
             this, QStringLiteral("選擇 FileWeaver 索引"), QString{},
@@ -212,6 +229,7 @@ void SearchWindow::clearResults() {
     model_->removeRows(0, model_->rowCount());
     selected_path_->clear();
     copy_->setEnabled(false);
+    open_->setEnabled(false);
 }
 
 void SearchWindow::schedule() {
@@ -280,6 +298,62 @@ void SearchWindow::selectResult() {
                           : QString{};
     selected_path_->setText(preview(path, 2048));
     copy_->setEnabled(!path.isEmpty());
+    open_->setEnabled(!path.isEmpty() && !opener_.isBusy() && confirmation_.isNull());
+}
+
+void SearchWindow::requestOpenSelected() {
+    if (opener_.isBusy() || !confirmation_.isNull()) {
+        return;
+    }
+    const auto current = results_->currentIndex();
+    if (!current.isValid()) {
+        return;
+    }
+    const auto path = model_->index(current.row(), 0).data(Qt::UserRole).toString();
+    const auto error = fileOpenPolicyError(path);
+    if (!error.isEmpty()) {
+        status_->setText(error);
+        return;
+    }
+    auto *dialog = new QDialog(this);
+    dialog->setObjectName(QStringLiteral("openConfirmation"));
+    dialog->setWindowTitle(QStringLiteral("確認開啟檔案"));
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowModality(Qt::WindowModal);
+    dialog->resize(640, 260);
+    auto *layout = new QVBoxLayout(dialog);
+    auto *label = new QLabel(QStringLiteral("要將下列檔案交由 Windows 預設程式開啟嗎？"), dialog);
+    label->setWordWrap(true);
+    layout->addWidget(label);
+    auto *target = new QPlainTextEdit(dialog);
+    target->setObjectName(QStringLiteral("openTarget"));
+    target->setAccessibleName(QStringLiteral("即將開啟的完整路徑"));
+    target->setReadOnly(true);
+    target->setPlainText(path);
+    layout->addWidget(target, 1);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Open | QDialogButtonBox::Cancel, dialog);
+    buttons->setObjectName(QStringLiteral("openConfirmationButtons"));
+    buttons->button(QDialogButtonBox::Open)->setText(QStringLiteral("開啟"));
+    buttons->button(QDialogButtonBox::Open)->setAutoDefault(false);
+    auto *cancel = buttons->button(QDialogButtonBox::Cancel);
+    cancel->setText(QStringLiteral("取消"));
+    cancel->setDefault(true);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    connect(dialog, &QDialog::accepted, this, [this, path] {
+        if (opener_.submit(path)) {
+            status_->setText(QStringLiteral("正在檢查並送出開啟請求…"));
+        }
+    });
+    connect(dialog, &QDialog::finished, this, [this] {
+        confirmation_.clear();
+        selectResult();
+    });
+    confirmation_ = dialog;
+    selectResult();
+    dialog->open();
+    cancel->setFocus();
 }
 
 void SearchWindow::copyPath() {
@@ -301,6 +375,14 @@ void SearchWindow::copyPath() {
 }
 
 bool SearchWindow::eventFilter(QObject *watched, QEvent *event) {
+    if (watched == results_ && event->type() == QEvent::KeyPress) {
+        const auto *key = static_cast<QKeyEvent *>(event);
+        if ((key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) &&
+            (key->modifiers() & ~Qt::KeypadModifier) == Qt::NoModifier) {
+            requestOpenSelected();
+            return true;
+        }
+    }
     if (watched == query_ && event->type() == QEvent::KeyPress) {
         const auto *key = static_cast<QKeyEvent *>(event);
         if (key->key() == Qt::Key_Down && model_->rowCount() > 0) {
@@ -315,6 +397,10 @@ bool SearchWindow::eventFilter(QObject *watched, QEvent *event) {
 void SearchWindow::closeEvent(QCloseEvent *event) {
     debounce_.stop();
     controller_.cancel();
+    opener_.cancel();
+    if (!confirmation_.isNull()) {
+        confirmation_->reject();
+    }
     updateHotkey(false);
     QWidget::closeEvent(event);
 }

@@ -48,7 +48,8 @@ Further work is prioritized for Windows; release packaging is out of scope.
 | Future | Additional search modes/filters and root management commands beyond Phase 1 deliverables | Planned |
 | 2 | Opt-in Windows Qt index chooser/search window, bounded async worker, keyboard selection and explicit path copy | Tested |
 | 2 | Opt-in configurable Windows global hotkey, collision handling and search focus | Tested |
-| 2 | File opening, fuzzy ranking, watchers and safe preview | Planned |
+| 2 | Confirmed opening of selected supported Windows local files | Tested |
+| 2 | Fuzzy ranking, watchers and safe preview | Planned |
 | 3 | Analysis, duplicates, organizer, rename, journal | Planned |
 | 4 | Project launcher, opt-in clipboard, activity | Planned |
 | 5 | Opt-in semantic search, backup and restore | Planned |

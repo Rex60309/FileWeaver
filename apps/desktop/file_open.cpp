@@ -1,0 +1,252 @@
+#include "file_open.hpp"
+#include <QMetaObject>
+#include <QStringList>
+#include <QThread>
+#include <array>
+#include <exception>
+#include <objbase.h>
+#include <shellapi.h>
+#include <stdexcept>
+#include <utility>
+#include <windows.h>
+
+namespace fileweaver::desktop {
+namespace {
+QString systemError(const QString &action, unsigned long error) {
+    return action + QStringLiteral("（Windows 錯誤 %1）。").arg(error);
+}
+
+QString inspectFile(const QString &path, const std::stop_token &stop) {
+    const auto root = path.left(3).toStdWString();
+    const auto drive = GetDriveTypeW(root.c_str());
+    if (drive != DRIVE_FIXED && drive != DRIVE_REMOVABLE && drive != DRIVE_CDROM &&
+        drive != DRIVE_RAMDISK) {
+        return QStringLiteral("此版本只開啟本機磁碟上的檔案，請確認磁碟仍可使用。");
+    }
+    const auto parts = path.mid(3).split(u'\\');
+    QString current = path.left(2);
+    for (qsizetype i = 0; i < parts.size(); ++i) {
+        if (stop.stop_requested()) {
+            return QStringLiteral("已取消開啟。");
+        }
+        current += u'\\' + parts[i];
+        const auto native = current.toStdWString();
+        const auto attributes = GetFileAttributesW(native.c_str());
+        if (attributes == INVALID_FILE_ATTRIBUTES) {
+            const auto error = GetLastError();
+            return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND
+                       ? QStringLiteral("檔案或所在目錄已不存在，請更新索引後重試。")
+                       : systemError(QStringLiteral("無法檢查檔案，請確認存取權限與磁碟狀態"),
+                                     error);
+        }
+        if ((attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+            return QStringLiteral(
+                "此版本不開啟含有符號連結、junction 或其他 reparse point 的路徑。");
+        }
+        const bool directory = (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        if (directory != (i + 1 < parts.size())) {
+            return QStringLiteral("目標不再是一般檔案，請更新索引後重試。");
+        }
+        if ((attributes & FILE_ATTRIBUTE_OFFLINE) != 0) {
+            return QStringLiteral("檔案目前離線，請先確認它可在本機存取。");
+        }
+    }
+    return {};
+}
+
+QString launchFile(const QString &path) {
+    const auto initialized =
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    if (FAILED(initialized)) {
+        return QStringLiteral("無法初始化 Windows 開啟介面（錯誤 %1）。")
+            .arg(static_cast<unsigned long>(initialized));
+    }
+    struct Apartment {
+        ~Apartment() { CoUninitialize(); }
+    } apartment;
+    std::array<wchar_t, MAX_PATH + 1> directory{};
+    const auto length = GetSystemDirectoryW(directory.data(), static_cast<UINT>(directory.size()));
+    if (length == 0 || length >= directory.size()) {
+        return QStringLiteral("無法取得 Windows 系統目錄，未送出開啟請求。");
+    }
+    const auto native = path.toStdWString();
+    SHELLEXECUTEINFOW request{};
+    request.cbSize = sizeof(request);
+    request.fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI | SEE_MASK_UNICODE;
+    request.lpVerb = L"open";
+    request.lpFile = native.c_str();
+    request.lpDirectory = directory.data();
+    request.nShow = SW_SHOWNORMAL;
+    if (ShellExecuteExW(&request) == FALSE) {
+        const auto error = GetLastError();
+        if (error == ERROR_NO_ASSOCIATION) {
+            return QStringLiteral("Windows 尚未設定這類檔案的預設程式，請先設定後重試。");
+        }
+        if (error == ERROR_CANCELLED) {
+            return QStringLiteral("Windows 或使用者取消了開啟請求。");
+        }
+        return systemError(QStringLiteral("無法交由 Windows 開啟，請確認檔案與預設程式"), error);
+    }
+    return {};
+}
+} // namespace
+
+QString fileOpenPolicyError(const QString &path) {
+    if (path.isEmpty() || path.size() > 32760 || QString::fromUtf8(path.toUtf8()) != path ||
+        path.contains(QChar{0})) {
+        return QStringLiteral("路徑無效或過長，未送出開啟請求。");
+    }
+    if (path.size() < 4 ||
+        !((path[0] >= u'A' && path[0] <= u'Z') || (path[0] >= u'a' && path[0] <= u'z')) ||
+        path[1] != u':' || path[2] != u'\\') {
+        return QStringLiteral("只支援本機磁碟的完整路徑，不支援網址、UNC 或裝置路徑。");
+    }
+    for (const auto character : path) {
+        const auto value = character.unicode();
+        if (value < 32 || value == 127 || (value >= 0x202a && value <= 0x202e) ||
+            (value >= 0x2066 && value <= 0x2069)) {
+            return QStringLiteral("路徑包含控制字元，請複製路徑並手動檢查。");
+        }
+    }
+    const auto parts = path.mid(3).split(u'\\');
+    for (const auto &part : parts) {
+        if (part.isEmpty() || part == u"." || part == u".." || part.endsWith(u'.') ||
+            part.endsWith(u' ') || part.contains(u'/')) {
+            return QStringLiteral("路徑格式不受支援，請更新索引或複製路徑手動檢查。");
+        }
+        for (const auto character : part) {
+            if (QStringLiteral("<>\"|?*:").contains(character)) {
+                return QStringLiteral("路徑包含不受支援的字元。");
+            }
+        }
+        const auto base = part.section(u'.', 0, 0).toUpper();
+        if (base == u"CON" || base == u"PRN" || base == u"AUX" || base == u"NUL" ||
+            (base.size() == 4 && (base.startsWith(u"COM") || base.startsWith(u"LPT")) &&
+             base[3] >= u'1' && base[3] <= u'9')) {
+            return QStringLiteral("不支援 Windows 保留的裝置名稱。");
+        }
+    }
+    const auto extension = parts.last().section(u'.', -1).toLower();
+    const QStringList supported{
+        QStringLiteral("txt"),  QStringLiteral("md"),   QStringLiteral("pdf"),
+        QStringLiteral("docx"), QStringLiteral("xlsx"), QStringLiteral("pptx"),
+        QStringLiteral("csv"),  QStringLiteral("png"),  QStringLiteral("jpg"),
+        QStringLiteral("jpeg"), QStringLiteral("bmp"),  QStringLiteral("gif"),
+        QStringLiteral("webp"), QStringLiteral("mp3"),  QStringLiteral("wav"),
+        QStringLiteral("flac"), QStringLiteral("aac"),  QStringLiteral("m4a"),
+        QStringLiteral("ogg"),  QStringLiteral("mp4"),  QStringLiteral("mkv"),
+        QStringLiteral("avi"),  QStringLiteral("mov"),  QStringLiteral("webm")};
+    if (!parts.last().contains(u'.') || !supported.contains(extension)) {
+        return QStringLiteral("此版本只開啟支援的文件、圖片與影音；其他類型請複製路徑手動處理。");
+    }
+    return {};
+}
+
+FileOpenApi windowsFileOpenApi() { return {inspectFile, launchFile}; }
+
+OpenReply openFileWithApi(const QString &path, const std::stop_token &stop,
+                          const FileOpenApi &api) {
+    const auto cancelled = [] {
+        return OpenReply{OpenState::cancelled, QStringLiteral("已取消開啟。")};
+    };
+    if (stop.stop_requested()) {
+        return cancelled();
+    }
+    const auto policy = fileOpenPolicyError(path);
+    if (!policy.isEmpty()) {
+        return {OpenState::failed, policy};
+    }
+    if (!api.inspect || !api.launch) {
+        throw std::invalid_argument("File opening requires inspection and launch adapters");
+    }
+    const auto inspected = api.inspect(path, stop);
+    if (stop.stop_requested()) {
+        return cancelled();
+    }
+    if (!inspected.isEmpty()) {
+        return {OpenState::failed, inspected};
+    }
+    const auto error = api.launch(path);
+    return error.isEmpty()
+               ? OpenReply{OpenState::handed_off,
+                           QStringLiteral("已交由 Windows 預設程式處理；不代表檔案已成功顯示。")}
+               : OpenReply{OpenState::failed, error};
+}
+
+OpenReply openSelectedFile(const QString &path, const std::stop_token &stop) {
+    return openFileWithApi(path, stop, windowsFileOpenApi());
+}
+
+FileOpenController::FileOpenController(Open open, QObject *parent)
+    : QObject(parent), open_(std::move(open)) {
+    if (!open_) {
+        throw std::invalid_argument("File opening requires an open function");
+    }
+    qRegisterMetaType<OpenReply>();
+    worker_ = std::jthread([this](const std::stop_token &stop) { run(stop); });
+}
+
+FileOpenController::~FileOpenController() {
+    cancel();
+    worker_.request_stop();
+    ready_.notify_all();
+    worker_.join();
+}
+
+bool FileOpenController::submit(QString path) {
+    Q_ASSERT(QThread::currentThread() == thread());
+    if (busy_) {
+        return false;
+    }
+    {
+        const std::lock_guard lock(mutex_);
+        operation_stop_ = std::stop_source{};
+        pending_ = std::move(path);
+    }
+    busy_ = true;
+    ready_.notify_one();
+    return true;
+}
+
+bool FileOpenController::isBusy() const { return busy_; }
+
+void FileOpenController::cancel() {
+    Q_ASSERT(QThread::currentThread() == thread());
+    const std::lock_guard lock(mutex_);
+    operation_stop_.request_stop();
+}
+
+void FileOpenController::run(const std::stop_token &stop) {
+    while (!stop.stop_requested()) {
+        std::unique_lock lock(mutex_);
+        ready_.wait(lock, stop, [this] { return pending_.has_value(); });
+        if (stop.stop_requested()) {
+            return;
+        }
+        if (!pending_) {
+            continue;
+        }
+        const auto path = std::move(*pending_);
+        pending_.reset();
+        const auto operation_stop = operation_stop_.get_token();
+        lock.unlock();
+        OpenReply reply;
+        try {
+            reply = open_(path, operation_stop);
+        } catch (const std::exception &error) {
+            reply = {OpenState::failed, QString::fromUtf8(error.what()).left(4096)};
+        } catch (...) {
+            reply = {OpenState::failed, QStringLiteral("開啟請求發生未知錯誤，請稍後手動重試。")};
+        }
+        if (!stop.stop_requested()) {
+            QMetaObject::invokeMethod(
+                this,
+                [this, reply = std::move(reply)] {
+                    busy_ = false;
+                    emit completed(reply);
+                },
+                Qt::QueuedConnection);
+        }
+    }
+}
+} // namespace fileweaver::desktop

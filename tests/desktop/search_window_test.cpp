@@ -1,3 +1,4 @@
+#include "../support/directory_link.hpp"
 #include "arguments.hpp"
 #include "fileweaver/application/index.hpp"
 #include "fileweaver/application/initialize.hpp"
@@ -10,10 +11,13 @@
 #include <QClipboard>
 #include <QComboBox>
 #include <QCommandLineParser>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QKeySequenceEdit>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QScopeGuard>
 #include <QSemaphore>
@@ -30,9 +34,13 @@
 #include <thread>
 #include <windows.h>
 
+using fileweaver::desktop::FileOpenApi;
+using fileweaver::desktop::FileOpenController;
 using fileweaver::desktop::GlobalHotkey;
 using fileweaver::desktop::HotkeyApi;
 using fileweaver::desktop::HotkeyBinding;
+using fileweaver::desktop::OpenReply;
+using fileweaver::desktop::OpenState;
 using fileweaver::desktop::SearchController;
 using fileweaver::desktop::SearchReply;
 using fileweaver::desktop::SearchWindow;
@@ -53,6 +61,214 @@ fileweaver::SearchResult record(const std::string &name) {
 class DesktopTests final : public QObject {
     Q_OBJECT
   private slots:
+    void fileOpeningPolicyCancellationAndErrors() {
+        int inspected = 0;
+        int launched = 0;
+        QString requested;
+        FileOpenApi api{[&](const QString &path, const auto &) {
+                            ++inspected;
+                            requested = path;
+                            return QString{};
+                        },
+                        [&](const QString &path) {
+                            ++launched;
+                            requested = path;
+                            return QString{};
+                        }};
+        const auto path = QStringLiteral("C:\\合成 資料\\報告_日本語😀 & notes.TXT");
+        auto reply = fileweaver::desktop::openFileWithApi(path, {}, api);
+        QVERIFY(reply.state == OpenState::handed_off);
+        QCOMPARE(requested, path);
+        QCOMPARE(inspected, 1);
+        QCOMPARE(launched, 1);
+        for (const auto &value :
+             {"", "https://example.invalid/a.txt", "C:relative.txt", "\\\\server\\share\\file.txt",
+              "\\\\?\\C:\\file.txt", "C:\\file.txt:stream", "C:\\folder\\..\\file.txt",
+              "C:\\folder.\\file.txt", "C:\\folder \\file.txt", "C:\\tool.exe", "C:\\tool.cmd",
+              "C:\\tool.ps1", "C:\\file.lnk", "C:\\file.url", "C:\\file.docm", "C:\\file.rar",
+              "C:\\NUL.txt"}) {
+            reply = fileweaver::desktop::openFileWithApi(QString::fromLatin1(value), {}, api);
+            QVERIFY(reply.state == OpenState::failed);
+        }
+        const auto malformed = QStringLiteral("C:\\bad") + QChar{0xd800} + QStringLiteral(".txt");
+        QVERIFY(!fileweaver::desktop::fileOpenPolicyError(malformed).isEmpty());
+        QVERIFY(!fileweaver::desktop::fileOpenPolicyError(QStringLiteral("C:\\bad\u202e.txt"))
+                     .isEmpty());
+        QCOMPARE(inspected, 1);
+        QCOMPARE(launched, 1);
+        std::stop_source cancelled;
+        cancelled.request_stop();
+        QVERIFY(fileweaver::desktop::openFileWithApi(path, cancelled.get_token(), api).state ==
+                OpenState::cancelled);
+        QCOMPARE(inspected, 1);
+        FileOpenApi missing{
+            [](const auto &, const auto &) { return QStringLiteral("synthetic missing"); },
+            api.launch};
+        QVERIFY(fileweaver::desktop::openFileWithApi(path, {}, missing).state == OpenState::failed);
+        QCOMPARE(launched, 1);
+        std::stop_source during;
+        FileOpenApi interrupted{[&](const auto &, const auto &) {
+                                    during.request_stop();
+                                    return QString{};
+                                },
+                                api.launch};
+        QVERIFY(fileweaver::desktop::openFileWithApi(path, during.get_token(), interrupted).state ==
+                OpenState::cancelled);
+        QCOMPARE(launched, 1);
+        FileOpenApi failed{api.inspect,
+                           [](const auto &) { return QStringLiteral("synthetic no association"); }};
+        QCOMPARE(fileweaver::desktop::openFileWithApi(path, {}, failed).message,
+                 QStringLiteral("synthetic no association"));
+    }
+
+    void fileOpeningNativeMetadataAndJunction() {
+        QTemporaryDir temporary;
+        QVERIFY(temporary.isValid());
+        const auto base = std::filesystem::path(temporary.path().toStdWString());
+        const auto source = base / std::filesystem::path(u8"資料 日本語😀");
+        std::filesystem::create_directory(source);
+        const auto file = source / std::filesystem::path(u8"報告.txt");
+        {
+            std::ofstream output(file);
+            output << "synthetic";
+        }
+        int launches = 0;
+        auto api = fileweaver::desktop::windowsFileOpenApi();
+        api.launch = [&](const auto &) {
+            ++launches;
+            return QString{};
+        };
+        const auto native = [](const auto &value) {
+            return QDir::toNativeSeparators(QString::fromStdWString(value.native()));
+        };
+        QVERIFY(fileweaver::desktop::openFileWithApi(native(file), {}, api).state ==
+                OpenState::handed_off);
+        QCOMPARE(launches, 1);
+        std::filesystem::remove(file);
+        QVERIFY(fileweaver::desktop::openFileWithApi(native(file), {}, api).state ==
+                OpenState::failed);
+        std::filesystem::create_directory(file);
+        QVERIFY(fileweaver::desktop::openFileWithApi(native(file), {}, api).state ==
+                OpenState::failed);
+        std::filesystem::remove(file);
+        {
+            std::ofstream output(file);
+            output << "synthetic";
+        }
+        const auto link = base / "junction";
+        fileweaver::test::directoryLink({source, link});
+        QVERIFY(
+            fileweaver::desktop::openFileWithApi(native(link / file.filename()), {}, api).state ==
+            OpenState::failed);
+        QCOMPARE(launches, 1);
+        QCOMPARE(std::filesystem::file_size(file), std::uintmax_t{9});
+    }
+
+    void fileOpeningRequiresConfirmationAndUsesSnapshot() {
+        std::atomic<int> calls = 0;
+        QString submitted;
+        FileOpenController::Open opener = [&](const QString &path, const auto &) {
+            submitted = path;
+            ++calls;
+            return OpenReply{OpenState::handed_off, QStringLiteral("synthetic handoff")};
+        };
+        SearchWindow window(
+            [](const auto &, const auto &) {
+                return std::vector<fileweaver::SearchResult>{record("報告_日本語😀.txt"),
+                                                             record("second.txt")};
+            },
+            nullptr, fileweaver::desktop::windowsHotkeyApi(), opener);
+        window.show();
+        window.activateWindow();
+        auto *query = control<QLineEdit>(window, "query");
+        auto *tree = control<QTreeView>(window, "results");
+        auto *open = control<QPushButton>(window, "openFile");
+        QVERIFY(!open->isEnabled());
+        window.setDatabase(QStringLiteral("C:/synthetic/never-opened.sqlite"));
+        query->setText(QStringLiteral("report"));
+        QTRY_COMPARE(tree->model()->rowCount(), 2);
+        QCOMPARE(calls.load(), 0);
+        QTest::mouseClick(open, Qt::LeftButton);
+        auto *dialog = window.findChild<QDialog *>(QStringLiteral("openConfirmation"));
+        QVERIFY(dialog != nullptr);
+        auto *buttons =
+            dialog->findChild<QDialogButtonBox *>(QStringLiteral("openConfirmationButtons"));
+        QVERIFY(buttons != nullptr);
+        QVERIFY(buttons->button(QDialogButtonBox::Cancel)->isDefault());
+        QCOMPARE(dialog->findChild<QPlainTextEdit *>(QStringLiteral("openTarget"))->toPlainText(),
+                 QStringLiteral("C:\\synthetic\\報告_日本語😀.txt"));
+        QCOMPARE(calls.load(), 0);
+        QTest::keyClick(dialog,
+                        Qt::Key_Return); // Cancel is the safe default, including repeated Enter.
+        QTRY_VERIFY(window.findChild<QDialog *>(QStringLiteral("openConfirmation")) == nullptr);
+        QCOMPARE(calls.load(), 0);
+        QTest::mouseClick(open, Qt::LeftButton);
+        dialog = window.findChild<QDialog *>(QStringLiteral("openConfirmation"));
+        QVERIFY(dialog != nullptr);
+        buttons = dialog->findChild<QDialogButtonBox *>(QStringLiteral("openConfirmationButtons"));
+        QVERIFY(buttons != nullptr);
+        QTest::mouseClick(buttons->button(QDialogButtonBox::Cancel), Qt::LeftButton);
+        QTRY_VERIFY(window.findChild<QDialog *>(QStringLiteral("openConfirmation")) == nullptr);
+        QCOMPARE(calls.load(), 0);
+        tree->setFocus();
+        QTest::keyClick(tree, Qt::Key_Return);
+        dialog = window.findChild<QDialog *>(QStringLiteral("openConfirmation"));
+        QVERIFY(dialog != nullptr);
+        buttons = dialog->findChild<QDialogButtonBox *>(QStringLiteral("openConfirmationButtons"));
+        QVERIFY(buttons != nullptr);
+        tree->setCurrentIndex(
+            tree->model()->index(1, 0)); // Preserve the path the user actually confirms.
+        QTest::mouseClick(buttons->button(QDialogButtonBox::Open), Qt::LeftButton);
+        QTRY_COMPARE(calls.load(), 1);
+        QTRY_VERIFY(control<QLabel>(window, "status")
+                        ->text()
+                        .contains(QStringLiteral("synthetic handoff")));
+        QCOMPARE(submitted, QStringLiteral("C:\\synthetic\\報告_日本語😀.txt"));
+        query->clear();
+        QVERIFY(!open->isEnabled());
+    }
+
+    void fileOpeningWorkerIsBoundedAndCancellable() {
+        std::atomic<bool> entered = false;
+        std::atomic<bool> exited = false;
+        auto cancelable = [&](const auto &, const auto &stop) {
+            std::mutex mutex;
+            std::condition_variable_any ready;
+            std::unique_lock lock(mutex);
+            entered = true;
+            ready.wait(lock, stop, [] { return false; });
+            exited = true;
+            return OpenReply{OpenState::cancelled, QStringLiteral("synthetic cancel")};
+        };
+        auto controller = std::make_unique<FileOpenController>(cancelable);
+        QVERIFY(controller->submit(QStringLiteral("C:\\first.txt")));
+        QTRY_VERIFY(entered.load());
+        QVERIFY(!controller->submit(QStringLiteral("C:\\second.txt")));
+        bool heartbeat = false;
+        QTimer::singleShot(0, controller.get(), [&] { heartbeat = true; });
+        QTRY_VERIFY(heartbeat);
+        QSignalSpy completed(controller.get(), &FileOpenController::completed);
+        controller->cancel();
+        QTRY_COMPARE(completed.count(), 1);
+        QVERIFY(exited.load());
+        QVERIFY(!controller->isBusy());
+        controller.reset();
+        entered = false;
+        exited = false;
+        controller = std::make_unique<FileOpenController>(cancelable);
+        QVERIFY(controller->submit(QStringLiteral("C:\\closing.txt")));
+        QTRY_VERIFY(entered.load());
+        controller.reset();
+        QVERIFY(exited.load());
+        FileOpenController failed([](const auto &, const auto &) -> OpenReply {
+            throw std::runtime_error("synthetic launch exception");
+        });
+        QSignalSpy errors(&failed, &FileOpenController::completed);
+        QVERIFY(failed.submit(QStringLiteral("C:\\first.txt")));
+        QTRY_COMPARE(errors.count(), 1);
+        QVERIFY(qvariant_cast<OpenReply>(errors.at(0).at(0)).state == OpenState::failed);
+    }
+
     void hotkeyThreadMessageReachesQtDispatcher() {
         HotkeyBinding binding{};
         GlobalHotkey hotkey(HotkeyApi{[&](const HotkeyBinding &request) {
