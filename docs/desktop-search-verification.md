@@ -84,7 +84,7 @@ ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 and
 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1. The existing WSL build uses
 GCC and Unix Makefiles; initial preset generator mismatch was corrected by
 explicitly retaining that generator. WSL reported filesystem clock-skew warnings;
-no core source changed in this slice. Hosted MSVC CI results are pending push. The hosted desktop job runs
+no core source changed in this slice. Hosted MSVC CI passed; see the final acceptance evidence below. The hosted desktop job runs
 Debug/Release with the same synthetic minimal-platform interaction suite;
 it does not substitute for native visual inspection.
 
@@ -123,5 +123,36 @@ files. Verified compact response success, idempotent repeat, modified commit
 rejection and preservation of the verified file; live download also passed.
 No dependency versions or hashes changed; no checksum bypass was added.
 Windows CI now restores the pinned VCPKG_ROOT after Visual Studio setup, which
-otherwise replaces it with the runner's bundled vcpkg. A rerun is required before
-claiming hosted desktop success. Both changes affect build preparation only.
+otherwise replaces it with the runner's bundled vcpkg. The corrected rerun passed all jobs as recorded below. Both changes affect build
+preparation only.
+
+## Final hosted acceptance
+
+Verified implementation revision: `18f17a6e4e2be2c328b6dae9f73884abe7f36766`.
+[Successful quality run 42598858612](https://github.com/Rex60309/FileWeaver/actions/runs/42598858612)
+completed on 2026-11-09; all four jobs succeeded:
+
+| Job | Actual result |
+| --- | --- |
+| Windows 2022, MSVC 19.44.35229 desktop | Debug 12/12, Release 12/12 CTest tests passed |
+| Windows 2022, MSVC 19.44.35229 core | Debug 11/11, Release 11/11 passed |
+| Ubuntu 24.04 core | Debug 11/11, Release 11/11 passed |
+| Ubuntu analysis | Format, lint and Clang combined ASan/UBSan 11/11 passed |
+
+Desktop Debug/Release CTest elapsed times were 69.81/48.68 seconds. The first
+source build of the Qt dependencies on the hosted Windows runner took over an
+hour; the 90-minute desktop job budget was sufficient. The corrected preparation
+step verified the original PCRE2 digest and the pinned vcpkg checkout was used.
+These are execution observations, not search performance benchmark results.
+
+The final follow-up changes Markdown documentation only, records this verified
+revision, and uses `[skip ci]` to avoid repeating the unchanged hour-long Qt
+build. No application source, workflow, dependency, or test changed after the
+verified revision. No failing test was bypassed; both full desktop profiles and
+all existing core jobs ran successfully before this documentation update.
+
+Remaining scope: full Phase 2 hotkey/fuzzy/watcher/preview/file-opening features,
+GUI sanitizer support, all-DPI/accessibility coverage and distributable release
+packaging remain unimplemented or unverified. Next proposed smallest milestone:
+Windows global-hotkey activation with visible collision handling and focus tests;
+that is a separate authorization and is not included in this change.

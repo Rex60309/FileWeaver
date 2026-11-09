@@ -5,8 +5,9 @@ No features are released. In Progress does not imply build or test acceptance.
 Phase 1 (PRODUCT_SPEC section 24) implementation and acceptance completed on
 2026-11-09. [Acceptance ledger](phase1-acceptance.md) records the verified source
 revision, executed CI, benchmark scope and remaining whole-product limitations.
-The selected Phase 2 Windows search window is tested locally; the rest of Phase 2
-and later phases remain planned. This is not a formal release.
+The selected Phase 2 Windows search window is tested locally and in hosted MSVC
+Debug/Release CI; [evidence](desktop-search-verification.md) records the verified
+revision. The rest of Phase 2 and later phases remain planned. This is not a formal release.
 
 | Phase | Feature | Status |
 | --- | --- | --- |
