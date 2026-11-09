@@ -103,7 +103,32 @@ observation/log/database was committed; generated evidence stays under build/.
 
 ## Remaining scope
 
-Hosted Windows/MSVC acceptance is pending push. Other file types, containing-folder
+Hosted Windows/MSVC acceptance passed as recorded below. Other file types, containing-folder
 opening, user-selected handlers, persistent preferences, fuzzy ranking, watcher,
 previews and release packaging are outside this slice. Next proposed milestone:
 explicitly selected containing-folder display in Explorer, after scope approval.
+
+## Hosted Windows acceptance — 2026-11-10 (Asia/Taipei)
+
+Verified implementation revision: `5f4bb0bbf1c83c5c8a23eb1f8814df62b03a222a`.
+[Quality run 42648551286](https://github.com/Rex60309/FileWeaver/actions/runs/42648551286)
+completed its Windows desktop job at 2026-11-10 01:02:55 +08:00.
+
+| Windows job | Observed result |
+| --- | --- |
+| Windows 2022 / MSVC 19.44.35229 desktop Debug | 12/12 CTest tests passed, 74.26 seconds |
+| Windows 2022 / MSVC 19.44.35229 desktop Release | 12/12 passed, 52.38 seconds |
+| Windows 2022 / MSVC core Debug | 11/11 passed, 71.53 seconds |
+| Windows 2022 / MSVC core Release | 11/11 passed, 50.28 seconds |
+
+Desktop tests include the new file-opening policy, native metadata/junction,
+confirmation snapshot and cancellation/backpressure cases. They use fake launches;
+the native Notepad observation above is a separate manual UI verification. A final
+read-only byte comparison also confirmed the synthetic text file was unchanged.
+No personal document was used or modified. Windows remains the selected focus;
+no additional manual Linux verification or release packaging was performed.
+
+The final follow-up changes Markdown only and uses `[skip ci]` to avoid repeating
+the unchanged Qt dependency build. Application code, workflow, dependency manifest
+and tests remain identical to the fully verified implementation revision above.
+No failing test was bypassed. git diff --check passed for the documentation update.

@@ -10,6 +10,8 @@ Debug/Release CI; [evidence](desktop-search-verification.md) records the verifie
 revision. The rest of Phase 2 and later phases remain planned. This is not a formal release.
 The Windows global-hotkey slice also passed native interaction and hosted MSVC
 Debug/Release checks; see [its acceptance evidence](global-hotkey-verification.md).
+Confirmed supported-file opening passed Windows GCC/native observation and hosted
+MSVC Debug/Release on 2026-11-10; see [evidence](file-opening-verification.md).
 Further work is prioritized for Windows; release packaging is out of scope.
 
 | Phase | Feature | Status |
