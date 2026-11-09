@@ -96,8 +96,7 @@ ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1:print_
 
 Windows combined ASan/UBSan remains unsupported by the configured preset; no
 sanitizer coverage of the Windows-only hotkey adapter is claimed. No performance
-benchmark result is claimed. Hosted CI for this revision is pending push and is
-separate from the earlier search-window milestone's successful CI.
+benchmark result is claimed. Hosted CI for this implementation revision passed; see the evidence below.
 
 ## Remaining scope
 
@@ -105,3 +104,21 @@ Settings persistence, tray/autorun behavior, file opening, fuzzy ranking,
 watchers and previews are not part of this slice. No release ZIP/installer is
 created. The next proposed smallest milestone is explicitly selected file opening
 with error handling; it requires a separate scope decision before implementation.
+
+## Hosted Windows acceptance
+
+Verified implementation: `4b0ad67b249a8abaa21c87282aefa2ad72650fc5`.
+[Successful quality run 42611933517](https://github.com/Rex60309/FileWeaver/actions/runs/42611933517)
+completed on 2026-11-09. Windows/MSVC 19.44.35229 desktop Debug and Release each
+passed 12/12 CTest tests, including the queued-thread-message hotkey regression.
+Observed desktop test times: Debug 70.88 seconds; Release 47.14 seconds.
+Windows/MSVC core Debug/Release each passed 11/11. All four workflow jobs passed;
+the already completed Linux/core-analysis evidence is retained above. No extra
+Linux work was scheduled after the user requested Windows-only prioritization.
+Future implementation and acceptance focus on Windows unless the user changes
+that scope. Release packaging remains excluded.
+
+This follow-up changes Markdown documentation only and uses `[skip ci]` to avoid
+rebuilding unchanged Qt dependencies. Application source, workflow, dependencies
+and tests are identical to the fully verified implementation revision above.
+No failing test was bypassed. git diff --check passed for the documentation update.

@@ -97,7 +97,7 @@ ctest --preset desktop-release --output-on-failure
 `python tools/prepare_qt_download.py` 再重新設定；此步驟仍要求符合固定版本的原始雜湊，不會略過驗證。
 MinGW 的編譯器、資源編譯器與依賴必須使用相同架構；不要混用 32 位元 windres 與 64 位元 GCC。
 執行時需保留建置目錄中的相依 DLL、`platforms` 與 `styles` 子目錄，不要只複製 EXE。
-目前沒有提供可攜式發行 ZIP，部署到其他電腦與正式發行仍需另行驗證及整理授權文件。
+目前以 Windows 功能開發與驗證為主，不安排發行包。
 已通過本機 Windows GCC 與遠端 Windows/MSVC 的 Debug／Release 測試及本機視窗操作驗證。
 驗證指令、CI 紀錄與限制見 [Windows 視窗驗證紀錄](docs/desktop-search-verification.md)。
 
