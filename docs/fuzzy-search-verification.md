@@ -108,3 +108,15 @@ clipboard. Hosted acceptance has not yet been recorded for this revision.
 Path matching, watcher/reconciliation and bounded safe previews remain planned.
 The next proposed smallest milestone is a user-selected Windows watcher with
 explicit overflow/restart reconciliation; it requires separate scope approval.
+
+## Hosted validation follow-up
+
+Initial implementation revision: `13078be26a672a8948bc5b792da374815a024f38`.
+[Initial run 42769306161](https://github.com/Rex60309/FileWeaver/actions/runs/42769306161)
+found an MSVC E2E fixture issue: the fuzzy contract passed an unresolved temporary
+root to the exact root filter, unlike existing fixture suites which resolve the
+temporary workspace first. Indexing stores canonical roots; search root filters
+intentionally use the exact indexed normalized path without live-source resolution
+so offline search works. Resolve the synthetic workspace before creating roots,
+retain the same root-equality assertion and add values on failure. No application
+contract or matching code was relaxed. The first Windows run is not a pass.

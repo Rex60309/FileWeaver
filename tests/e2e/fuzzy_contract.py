@@ -15,7 +15,7 @@ def invoke(*args, code=0):
     document = json.loads(result.stdout)  # Rejects multiple/trailing JSON documents.
     return document
 with tempfile.TemporaryDirectory(prefix="fileweaver-fuzzy-") as temporary:
-    base = Path(temporary)
+    base = Path(temporary).resolve()
     source = base / "資料 日本語😀"
     source.mkdir()
     names = ["report.txt", "reprot.txt", "image_processing_final_report.pdf", "日本語😀.txt", "z_report.txt"]
@@ -35,7 +35,9 @@ with tempfile.TemporaryDirectory(prefix="fileweaver-fuzzy-") as temporary:
     assert found("report", "--ext", "txt", "--limit", 1) == ["report.txt"]
     assert found("report", "--ext", "pdf") == ["image_processing_final_report.pdf"]
     assert found("report", "--min-size", 5) == ["z_report.txt"]
-    assert found("report", "--root", source) == found("report")
+    filtered = found("report", "--root", source)
+    unfiltered = found("report")
+    assert filtered == unfiltered, (str(source), filtered, unfiltered)
     assert found("report", "--fuzzy-exact-weight", 0, "--fuzzy-prefix-weight", 0,
                  "--fuzzy-token-weight", 0, "--fuzzy-subsequence-weight", 0,
                  "--fuzzy-typo-weight", 10000)[0] == "reprot.txt"
