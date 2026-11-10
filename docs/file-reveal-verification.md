@@ -83,3 +83,17 @@ Hosted Windows acceptance has not yet been recorded for this revision. Fuzzy
 ranking, watcher/reconciliation and safe previews remain planned Phase 2 work.
 The next proposed smallest milestone is deterministic fuzzy-search ranking;
 its public search behavior requires a separate scope decision.
+
+## Hosted Windows status
+
+Implementation revision: `76dcff04bec37b653c9a3777aa6d94ef9311e956`.
+[Quality run 42764008690](https://github.com/Rex60309/FileWeaver/actions/runs/42764008690)
+passed its Windows core job. The first desktop attempt failed before compilation
+because the GitHub metadata API returned HTTP 403 (rate limit exceeded).
+After the other jobs finished, the desktop job was rerun without changing code,
+checksums, download URLs or verification rules. Attempt 2 passed metadata
+preparation and entered desktop Debug dependency configuration/build; its final
+result is pending. This is not hosted desktop acceptance or a release claim.
+The existing analysis job also passed, but no additional manual Linux work was
+performed. This follow-up is Markdown only and uses [skip ci]; application source
+and tests remain the implementation revision linked above.
