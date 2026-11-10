@@ -22,6 +22,7 @@
 #include <QScopeGuard>
 #include <QSemaphore>
 #include <QSignalSpy>
+#include <QSpinBox>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTimer>
@@ -62,6 +63,53 @@ fileweaver::SearchResult record(const std::string &name) {
 class DesktopTests final : public QObject {
     Q_OBJECT
   private slots:
+    void fuzzyModeAndSettingsUseSharedRequest() {
+        std::mutex mutex;
+        fileweaver::SearchRequest last;
+        std::atomic<int> calls = 0;
+        SearchWindow window([&](const auto &request, const auto &) {
+            const std::lock_guard lock(mutex);
+            last = request;
+            ++calls;
+            return std::vector<fileweaver::SearchResult>{record("report.txt")};
+        });
+        window.show();
+        window.setDatabase(QStringLiteral("C:/synthetic/index.sqlite"));
+        auto *settings = control<QPushButton>(window, "fuzzySettingsButton");
+        QVERIFY(!settings->isEnabled());
+        control<QComboBox>(window, "mode")->setCurrentIndex(3);
+        QVERIFY(settings->isEnabled());
+        control<QLineEdit>(window, "query")->setText(QStringLiteral("reprot"));
+        QTRY_VERIFY(calls.load() > 0);
+        QTRY_COMPARE(control<QTreeView>(window, "results")->model()->rowCount(), 1);
+        {
+            const std::lock_guard lock(mutex);
+            QVERIFY(last.mode == fileweaver::SearchMode::fuzzy);
+            QVERIFY(last.sort == fileweaver::SearchSort::relevance);
+        }
+        QTest::mouseClick(settings, Qt::LeftButton);
+        auto *dialog = window.findChild<QDialog *>(QStringLiteral("fuzzySettings"));
+        QVERIFY(dialog != nullptr);
+        auto *weight = dialog->findChild<QSpinBox *>(QStringLiteral("fuzzyValue0"));
+        QVERIFY(weight != nullptr);
+        weight->setValue(777);
+        dialog->reject();
+        QTRY_VERIFY(window.findChild<QDialog *>(QStringLiteral("fuzzySettings")) == nullptr);
+        QTest::mouseClick(settings, Qt::LeftButton);
+        dialog = window.findChild<QDialog *>(QStringLiteral("fuzzySettings"));
+        QCOMPARE(dialog->findChild<QSpinBox *>(QStringLiteral("fuzzyValue0"))->value(), 1000);
+        dialog->findChild<QSpinBox *>(QStringLiteral("fuzzyValue0"))->setValue(888);
+        dialog->findChild<QSpinBox *>(QStringLiteral("fuzzyValue5"))->setValue(123);
+        const auto before = calls.load();
+        dialog->accept();
+        QTRY_VERIFY(calls.load() > before);
+        {
+            const std::lock_guard lock(mutex);
+            QCOMPARE(last.fuzzy.weights.exact, 888);
+            QCOMPARE(last.fuzzy.candidate_limit, std::size_t{123});
+        }
+    }
+
     void revealPolicyAndCancellation() {
         int handed = 0;
         FileOpenApi api{[](const auto &, const auto &) { return QString{}; },

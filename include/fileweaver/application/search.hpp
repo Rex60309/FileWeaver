@@ -1,5 +1,6 @@
 #pragma once
 
+#include "fileweaver/core/fuzzy.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -9,8 +10,8 @@
 #include <vector>
 
 namespace fileweaver {
-enum class SearchMode : std::uint8_t { exact, substring, prefix };
-enum class SearchSort : std::uint8_t { name, size, modified };
+enum class SearchMode : std::uint8_t { exact, substring, prefix, fuzzy };
+enum class SearchSort : std::uint8_t { name, size, modified, relevance };
 struct SearchFilters {
     std::optional<std::string> extension;
     std::optional<std::int64_t> minimum_size;
@@ -28,6 +29,7 @@ struct SearchRequest {
     SearchFilters filters{};
     SearchSort sort = SearchSort::name;
     bool descending = false;
+    FuzzyOptions fuzzy{};
 };
 struct SearchResult {
     std::int64_t file_id;
@@ -39,6 +41,7 @@ struct SearchResult {
 // Returns present indexed records only; does not revalidate live source files.
 // Exact is binary case-sensitive; substring/prefix fold ASCII case only.
 // Prefix matches the literal start of a filename. Limits 1..10000.
+// Fuzzy requires relevance sort, descending=false, bounded candidates and valid UTF-8.
 // Cancellation throws StorageError rather than returning partial results.
 [[nodiscard]] std::vector<SearchResult> search_files(const SearchRequest &request,
                                                      const std::stop_token &stop = {});

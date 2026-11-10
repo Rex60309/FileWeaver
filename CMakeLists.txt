@@ -16,14 +16,14 @@ option(FILEWEAVER_BUILD_DESKTOP "Build opt-in Windows Qt search window" OFF)
 find_package(CLI11 CONFIG REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(Catch2 3 CONFIG REQUIRED)
-add_library(fileweaver_core src/core/utc_time.cpp)
+add_library(fileweaver_core src/core/utc_time.cpp src/core/fuzzy.cpp)
 target_include_directories(fileweaver_core PUBLIC include)
 add_library(fileweaver_storage src/database/initialize.cpp)
 target_include_directories(fileweaver_storage PUBLIC include)
 target_link_libraries(fileweaver_storage PRIVATE unofficial::sqlite3::sqlite3)
 add_library(fileweaver_filesystem src/filesystem/scan.cpp)
 target_include_directories(fileweaver_filesystem PUBLIC include)
-target_link_libraries(fileweaver_storage PRIVATE fileweaver_filesystem)
+target_link_libraries(fileweaver_storage PRIVATE fileweaver_filesystem fileweaver_core)
 add_executable(fileweaver apps/cli/main.cpp)
 add_executable(search_core_benchmark benchmarks/search/core_search.cpp)
 target_include_directories(search_core_benchmark PRIVATE apps/cli)
@@ -76,6 +76,8 @@ add_test(NAME failure-recovery-contract COMMAND "${Python3_EXECUTABLE}"
   "${CMAKE_BINARY_DIR}/benchmark-build-info-$<CONFIG>.json")
 add_test(NAME prefix-contract COMMAND "${Python3_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/prefix_contract.py" "$<TARGET_FILE:fileweaver>")
+add_test(NAME fuzzy-contract COMMAND "${Python3_EXECUTABLE}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/fuzzy_contract.py" "$<TARGET_FILE:fileweaver>")
 add_test(NAME storage COMMAND storage_tests)
 add_test(NAME cli-contract COMMAND "${CMAKE_COMMAND}"
   "-DCLI=$<TARGET_FILE:fileweaver>" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/cli.cmake")
@@ -147,7 +149,7 @@ if(FILEWEAVER_BUILD_DESKTOP)
 endif()
 
 set(PROJECT_SOURCES tests/support/directory_link.hpp apps/cli/main.cpp apps/cli/output.hpp apps/cli/windows_io.hpp benchmarks/search/core_search.cpp benchmarks/search/process_memory.hpp src/database/initialize.cpp tests/integration/storage.cpp
-  src/core/utc_time.cpp include/fileweaver/core/utc_time.hpp
+  src/core/utc_time.cpp include/fileweaver/core/utc_time.hpp src/core/fuzzy.cpp include/fileweaver/core/fuzzy.hpp
   include/fileweaver/application/index.hpp
   include/fileweaver/application/inspect.hpp
   include/fileweaver/application/refresh.hpp
@@ -183,6 +185,7 @@ if(CLANG_TIDY)
     "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/search/core_search.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/database/initialize.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/core/utc_time.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/fuzzy.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/filesystem/scan.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/storage.cpp" ${DESKTOP_TIDY_SOURCES} ${TIDY_PLATFORM_ARGS} --warnings-as-errors=* VERBATIM)
 else()

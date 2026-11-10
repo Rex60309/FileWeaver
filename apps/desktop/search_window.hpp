@@ -41,6 +41,8 @@ class SearchWindow final : public QWidget {
     void updateHotkey(bool enabled);
     void copyPath();
     void requestSelected(FileAction action);
+    void configureFuzzy();
+    FuzzyOptions fuzzy_{};
     QString database_;
     // Non-owning pointers: widgets/model are owned immediately by their Qt parent.
     QLineEdit *database_path_;

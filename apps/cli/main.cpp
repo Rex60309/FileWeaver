@@ -81,12 +81,38 @@ int run_cli(int argc, char *argv[], bool json_requested) {
     bool descending = false;
     search->add_option("query", query, "Literal filename query")->required();
     search->add_option("--database", database, "Initialized database path")->required();
-    search->add_option("--mode", mode, "exact, substring or prefix")
-        ->check(CLI::IsMember({"exact", "substring", "prefix"}));
+    search->add_option("--mode", mode, "exact, substring, prefix or fuzzy")
+        ->check(CLI::IsMember({"exact", "substring", "prefix", "fuzzy"}));
     search->add_option("--limit", limit, "Maximum results (1..10000)")->check(CLI::Range(1, 10000));
-    search->add_option("--sort", sort, "Primary sort: name, size or modified")
-        ->check(CLI::IsMember({"name", "size", "modified"}));
+    const auto *sort_option =
+        search->add_option("--sort", sort, "name, size, modified; fuzzy defaults to relevance")
+            ->check(CLI::IsMember({"name", "size", "modified", "relevance"}));
     search->add_flag("--descending", descending, "Descending primary sort; ties stay ascending");
+    fileweaver::FuzzyOptions fuzzy;
+    search
+        ->add_option("--fuzzy-candidates", fuzzy.candidate_limit,
+                     "Fuzzy candidate budget (1..10000; default 4096)")
+        ->check(CLI::Range(1, 10000));
+    search
+        ->add_option("--fuzzy-exact-weight", fuzzy.weights.exact,
+                     "Fuzzy full-name bonus (default 1000)")
+        ->check(CLI::Range(0, 10000));
+    search
+        ->add_option("--fuzzy-prefix-weight", fuzzy.weights.prefix,
+                     "Fuzzy filename-prefix bonus (default 500)")
+        ->check(CLI::Range(0, 10000));
+    search
+        ->add_option("--fuzzy-token-weight", fuzzy.weights.token,
+                     "Fuzzy token substring score (default 300)")
+        ->check(CLI::Range(0, 10000));
+    search
+        ->add_option("--fuzzy-subsequence-weight", fuzzy.weights.subsequence,
+                     "Fuzzy subsequence score (default 100)")
+        ->check(CLI::Range(0, 10000));
+    search
+        ->add_option("--fuzzy-typo-weight", fuzzy.weights.typo,
+                     "Fuzzy typo score before edit penalty (default 50)")
+        ->check(CLI::Range(0, 10000));
     fileweaver::SearchFilters filters;
     std::string selected_extension;
     std::string selected_root;
@@ -211,7 +237,8 @@ int run_cli(int argc, char *argv[], bool json_requested) {
         }
         if (*search) {
             fileweaver::SearchRequest request{std::filesystem::path(utf8), query,
-                                              mode == "exact" ? fileweaver::SearchMode::exact
+                                              mode == "fuzzy"   ? fileweaver::SearchMode::fuzzy
+                                              : mode == "exact" ? fileweaver::SearchMode::exact
                                               : mode == "prefix"
                                                   ? fileweaver::SearchMode::prefix
                                                   : fileweaver::SearchMode::substring,
@@ -220,7 +247,10 @@ int run_cli(int argc, char *argv[], bool json_requested) {
             if (*extension_option) {
                 request.filters.extension = selected_extension;
             }
-            request.sort = sort == "size"       ? fileweaver::SearchSort::size
+            request.fuzzy = fuzzy;
+            request.sort = (sort == "relevance" || (mode == "fuzzy" && !*sort_option))
+                               ? fileweaver::SearchSort::relevance
+                           : sort == "size"     ? fileweaver::SearchSort::size
                            : sort == "modified" ? fileweaver::SearchSort::modified
                                                 : fileweaver::SearchSort::name;
             request.descending = descending;

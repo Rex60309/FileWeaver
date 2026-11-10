@@ -895,19 +895,31 @@ CatalogStatus catalog_status(const std::filesystem::path &database, const std::s
 
 std::vector<SearchResult> search_files(const SearchRequest &request, const std::stop_token &stop) {
     if (request.sort != SearchSort::name && request.sort != SearchSort::size &&
-        request.sort != SearchSort::modified) {
+        request.sort != SearchSort::modified && request.sort != SearchSort::relevance) {
         throw StorageError("Unsupported search sort", 2);
     }
     if (request.query.empty() || request.query.size() > 4096 ||
         request.query.find('\0') != std::string::npos || request.limit == 0 ||
         request.limit > 10000 ||
         (request.mode != SearchMode::exact && request.mode != SearchMode::substring &&
-         request.mode != SearchMode::prefix)) {
+         request.mode != SearchMode::prefix && request.mode != SearchMode::fuzzy)) {
         throw StorageError("Search requires a nonempty query up to 4096 bytes and limit 1..10000",
                            2);
     }
     if (request.database.empty() || utf8(request.database).find('\0') != std::string::npos) {
         throw StorageError("An explicit database path without null characters is required", 2);
+    }
+    const bool fuzzy = request.mode == SearchMode::fuzzy;
+    if ((request.sort == SearchSort::relevance) != fuzzy || (fuzzy && request.descending)) {
+        throw StorageError(
+            "Fuzzy mode requires relevance sort without descending; relevance is fuzzy-only", 2);
+    }
+    std::optional<FuzzyMatcher> matcher;
+    if (fuzzy) {
+        if (request.fuzzy.candidate_limit == 0 || request.fuzzy.candidate_limit > 10000) {
+            throw StorageError("Fuzzy candidate limit requires 1..10000", 2);
+        }
+        matcher.emplace(request.query, request.fuzzy.weights);
     }
     const auto &filters = request.filters;
     if (filters.modified_after && filters.modified_before &&
@@ -985,7 +997,8 @@ std::vector<SearchResult> search_files(const SearchRequest &request, const std::
     const std::string ordering =
         std::string("ORDER BY ") + primary + (request.descending ? " DESC," : " ASC,") +
         "name COLLATE BINARY ASC,normalized_path COLLATE BINARY ASC,root_id ASC,id ASC LIMIT ?2";
-    const char *predicate = request.mode == SearchMode::exact ? "name=?1 "
+    const char *predicate = fuzzy                               ? "?1 IS NOT NULL "
+                            : request.mode == SearchMode::exact ? "name=?1 "
                             : request.mode == SearchMode::prefix
                                 ? "instr(lower(name),lower(?1))=1 "
                                 : "instr(lower(name),lower(?1))>0 ";
@@ -1000,7 +1013,7 @@ std::vector<SearchResult> search_files(const SearchRequest &request, const std::
         ordering;
     auto query = prepare(db.get(), sql.c_str());
     bind_text(query.get(), 1, request.query);
-    bind_integer(query.get(), 2, static_cast<std::int64_t>(request.limit));
+    bind_integer(query.get(), 2, fuzzy ? -1 : static_cast<std::int64_t>(request.limit));
     const auto bind_null = [&](int position) {
         if (sqlite3_bind_null(query.get(), position) != SQLITE_OK) {
             throw StorageError("Cannot bind optional search filter", 1);
@@ -1039,6 +1052,8 @@ std::vector<SearchResult> search_files(const SearchRequest &request, const std::
     std::vector<SearchResult> results;
     results.reserve(request.limit);
     std::size_t text_bytes = 0;
+    std::size_t candidates = 0;
+    std::vector<std::pair<std::int64_t, SearchResult>> ranked;
     const auto text_column = [&](int column) {
         if (sqlite3_column_type(query.get(), column) != SQLITE_TEXT) {
             throw StorageError("Invalid indexed text", 5);
@@ -1047,11 +1062,6 @@ std::vector<SearchResult> search_files(const SearchRequest &request, const std::
         const int length = sqlite3_column_bytes(query.get(), column);
         if (value == nullptr || length < 0 || length > 131072) {
             throw StorageError("Invalid indexed text", 5);
-        }
-        text_bytes += static_cast<std::size_t>(length);
-        if (text_bytes > std::size_t{16} * 1024 * 1024) {
-            throw StorageError(
-                "Search result metadata exceeds the 16 MiB text budget; lower --limit", 1);
         }
         return std::string(reinterpret_cast<const char *>(value), static_cast<std::size_t>(length));
     };
@@ -1073,9 +1083,44 @@ std::vector<SearchResult> search_files(const SearchRequest &request, const std::
             sqlite3_column_int64(query.get(), 4) < 0) {
             throw StorageError("Invalid indexed metadata", 5);
         }
-        results.push_back({sqlite3_column_int64(query.get(), 0),
-                           sqlite3_column_int64(query.get(), 1), text_column(2), text_column(3),
-                           sqlite3_column_int64(query.get(), 4)});
+        auto name = text_column(3);
+        if (matcher && !matcher->candidate(name, stop)) {
+            continue;
+        }
+        if (matcher && ++candidates > request.fuzzy.candidate_limit) {
+            throw StorageError("Fuzzy candidate budget exceeded; narrow the query or filters, or "
+                               "raise --fuzzy-candidates (max 10000)",
+                               1);
+        }
+        auto path = text_column(2);
+        text_bytes += name.size() + path.size();
+        if (text_bytes > std::size_t{16} * 1024 * 1024) {
+            throw StorageError("Search result metadata exceeds the 16 MiB text budget; narrow "
+                               "query or lower limit",
+                               1);
+        }
+        SearchResult result{sqlite3_column_int64(query.get(), 0),
+                            sqlite3_column_int64(query.get(), 1), std::move(path), std::move(name),
+                            sqlite3_column_int64(query.get(), 4)};
+        if (matcher) {
+            const auto score = matcher->score(result.name, stop);
+            if (score) {
+                ranked.emplace_back(*score, std::move(result));
+            }
+        } else {
+            results.push_back(std::move(result));
+        }
+    }
+    if (matcher) {
+        std::stable_sort(ranked.begin(), ranked.end(), [](const auto &left, const auto &right) {
+            return left.first > right.first;
+        });
+        for (auto &entry : ranked) {
+            if (results.size() == request.limit) {
+                break;
+            }
+            results.push_back(std::move(entry.second));
+        }
     }
     if (stop.stop_requested()) {
         throw StorageError("Search cancelled", 1);

@@ -1840,3 +1840,107 @@ TEST_CASE("Cooperative refresh cancellation preserves per-root checkpoint semant
         REQUIRE(root.last_scan_status == "completed");
     }
 }
+
+TEST_CASE("Fuzzy matching uses Unicode scalars, tokens, typos and bounded inputs") {
+    using fileweaver::FuzzyMatcher;
+    REQUIRE(FuzzyMatcher("img proc fin").score("image_processing_final_report.pdf").has_value());
+    REQUIRE(FuzzyMatcher("reprot").score("report.txt").has_value());
+    REQUIRE(FuzzyMatcher("reprt").score("report.txt").has_value());
+    REQUIRE_FALSE(FuzzyMatcher("zzzzzz").score("report.txt").has_value());
+    REQUIRE_FALSE(FuzzyMatcher("日本😀").candidate("noise123.txt"));
+    REQUIRE(FuzzyMatcher("abc").candidate("bca"));
+    REQUIRE_FALSE(FuzzyMatcher("abc").score("bca").has_value());
+    REQUIRE(FuzzyMatcher("日本😀").score("日本語😀.txt").has_value());
+    REQUIRE(FuzzyMatcher("REPORT").score("report.txt") ==
+            FuzzyMatcher("report").score("REPORT.txt"));
+    REQUIRE_FALSE(FuzzyMatcher("É").score("é.txt").has_value());
+    REQUIRE_FALSE(FuzzyMatcher("ab").score("ac.txt").has_value());
+    REQUIRE_THROWS_AS(FuzzyMatcher("   "), fileweaver::StorageError);
+    REQUIRE_THROWS_AS(FuzzyMatcher(std::string(129, 'a')), fileweaver::StorageError);
+    REQUIRE_THROWS_AS(FuzzyMatcher(std::string("\xff", 1)), fileweaver::StorageError);
+    REQUIRE_THROWS_AS(FuzzyMatcher("a a a a a a a a a a a a a a a a a"), fileweaver::StorageError);
+    REQUIRE_THROWS_AS((FuzzyMatcher("report", {-1, 0, 0, 0, 0})), fileweaver::StorageError);
+    REQUIRE_THROWS_AS(FuzzyMatcher("report").candidate(std::string(1025, 'a')),
+                      fileweaver::StorageError);
+    std::stop_source stopped;
+    stopped.request_stop();
+    REQUIRE_THROWS_AS(FuzzyMatcher("report").candidate("report.txt", stopped.get_token()),
+                      fileweaver::StorageError);
+    REQUIRE_THROWS_AS(FuzzyMatcher("report").score("report.txt", stopped.get_token()),
+                      fileweaver::StorageError);
+    // The q-gram candidate gate must retain every generated one-edit neighbor.
+    for (const auto &query : {"abc", "report", "aaaaaa", "日本語abc"}) {
+        const FuzzyMatcher matcher(query);
+        const std::string original(query);
+        // ASCII edits include repeated q-grams and both sides of the tolerance boundary.
+        for (std::size_t i = 0; i < original.size(); ++i) {
+            if (static_cast<unsigned char>(original[i]) >= 128) {
+                continue;
+            }
+            auto changed = original;
+            changed.erase(i, 1);
+            REQUIRE(matcher.candidate(changed));
+            REQUIRE(matcher.score(changed).has_value());
+            changed = original;
+            changed[i] = 'z';
+            REQUIRE(matcher.candidate(changed));
+            REQUIRE(matcher.score(changed).has_value());
+            changed = original;
+            changed.insert(i, "z");
+            REQUIRE(matcher.candidate(changed));
+            REQUIRE(matcher.score(changed).has_value());
+        }
+    }
+}
+
+TEST_CASE("Fuzzy search ranks a filtered snapshot with deterministic ties and candidate budget") {
+    Fixture fixture;
+    fileweaver::initialize_database(fixture.path());
+    sql(fixture.path(),
+        "INSERT INTO roots(normalized_path,display_path,added_at) VALUES('/fixture','/fixture',0);"
+        "INSERT INTO "
+        "files(root_id,normalized_path,display_path,name,extension,size_bytes,modified_at,indexed_"
+        "at,is_present) VALUES"
+        "(1,'/z','/z','report.txt','.txt',3,10,0,1),"
+        "(1,'/a','/a','report.txt','.txt',3,10,0,1),"
+        "(1,'/b','/b','reprot.txt','.txt',4,20,0,1),"
+        "(1,'/c','/c','report.pdf','.pdf',5,30,0,1),"
+        "(1,'/missing','/missing','report','.txt',3,10,0,0),"
+        "(1,'/unicode','/unicode','日本語😀.txt','.txt',3,10,0,1)");
+    fileweaver::SearchRequest request{fixture.path(), "report", fileweaver::SearchMode::fuzzy};
+    request.sort = fileweaver::SearchSort::relevance;
+    auto results = fileweaver::search_files(request);
+    REQUIRE(results.size() == 4);
+    REQUIRE(results[0].name == "report.pdf");
+    REQUIRE(results[1].display_path == "/a");
+    REQUIRE(results[2].display_path == "/z");
+    request.filters.extension = "txt";
+    request.limit = 1;
+    REQUIRE(fileweaver::search_files(request)[0].display_path == "/a");
+    request.fuzzy.weights = {0, 0, 0, 0, 10000};
+    REQUIRE(fileweaver::search_files(request)[0].name == "reprot.txt");
+    request.filters.minimum_size = 5;
+    REQUIRE(fileweaver::search_files(request).empty());
+    request.filters = {};
+    request.fuzzy.candidate_limit = 1;
+    REQUIRE_THROWS_AS(fileweaver::search_files(request), fileweaver::StorageError);
+    request.fuzzy.candidate_limit = 0;
+    REQUIRE_THROWS_AS(fileweaver::search_files(request), fileweaver::StorageError);
+    request.fuzzy.candidate_limit = 4096;
+    request.query = "日本😀";
+    REQUIRE(fileweaver::search_files(request)[0].name == "日本語😀.txt");
+    sql(fixture.path(), "PRAGMA user_version=2");
+    REQUIRE(fileweaver::search_files(request).size() == 1);
+    std::stop_source stopped;
+    stopped.request_stop();
+    REQUIRE_THROWS_AS(fileweaver::search_files(request, stopped.get_token()),
+                      fileweaver::StorageError);
+    request.descending = true;
+    REQUIRE_THROWS_AS(fileweaver::search_files(request), fileweaver::StorageError);
+    request.descending = false;
+    request.sort = fileweaver::SearchSort::name;
+    REQUIRE_THROWS_AS(fileweaver::search_files(request), fileweaver::StorageError);
+    request.sort = fileweaver::SearchSort::relevance;
+    request.mode = fileweaver::SearchMode::substring;
+    REQUIRE_THROWS_AS(fileweaver::search_files(request), fileweaver::StorageError);
+}

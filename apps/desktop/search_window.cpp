@@ -8,6 +8,7 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
+#include <QFormLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QItemSelectionModel>
@@ -20,11 +21,13 @@
 #include <QPushButton>
 #include <QShortcut>
 #include <QSignalBlocker>
+#include <QSpinBox>
 #include <QStandardItemModel>
 #include <QStyle>
 #include <QTreeView>
 #include <QVBoxLayout>
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <utility>
 
@@ -89,12 +92,19 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     mode_ = new QComboBox(this);
     mode_->setObjectName(QStringLiteral("mode"));
     mode_->setAccessibleName(QStringLiteral("比對方式"));
-    mode_->addItems(
-        {QStringLiteral("包含文字"), QStringLiteral("檔名開頭"), QStringLiteral("完整檔名")});
+    mode_->addItems({QStringLiteral("包含文字"), QStringLiteral("檔名開頭"),
+                     QStringLiteral("完整檔名"), QStringLiteral("模糊檔名")});
+    auto *fuzzy_settings = new QPushButton(QStringLiteral("模糊設定…"), this);
+    fuzzy_settings->setObjectName(QStringLiteral("fuzzySettingsButton"));
+    fuzzy_settings->setEnabled(false);
+    connect(fuzzy_settings, &QPushButton::clicked, this, &SearchWindow::configureFuzzy);
+    connect(mode_, &QComboBox::currentIndexChanged, this,
+            [fuzzy_settings](int index) { fuzzy_settings->setEnabled(index == 3); });
     auto *search_button = new QPushButton(QStringLiteral("搜尋"), this);
     search_button->setObjectName(QStringLiteral("search"));
     search_row->addWidget(query_, 1);
     search_row->addWidget(mode_);
+    search_row->addWidget(fuzzy_settings);
     search_row->addWidget(search_button);
     layout->addLayout(search_row.release());
     auto hotkey_row = std::make_unique<QHBoxLayout>();
@@ -267,11 +277,56 @@ void SearchWindow::searchNow() {
         return;
     }
     SearchRequest request{std::filesystem::path(database_.toStdWString()), query.toStdString()};
-    request.mode = mode_->currentIndex() == 1   ? SearchMode::prefix
+    request.mode = mode_->currentIndex() == 3   ? SearchMode::fuzzy
+                   : mode_->currentIndex() == 1 ? SearchMode::prefix
                    : mode_->currentIndex() == 2 ? SearchMode::exact
                                                 : SearchMode::substring;
+    if (request.mode == SearchMode::fuzzy) {
+        request.sort = SearchSort::relevance;
+        request.fuzzy = fuzzy_;
+    }
     status_->setText(QStringLiteral("正在搜尋…"));
     controller_.submit(std::move(request));
+}
+
+void SearchWindow::configureFuzzy() {
+    auto *dialog = new QDialog(this);
+    dialog->setObjectName(QStringLiteral("fuzzySettings"));
+    dialog->setWindowTitle(QStringLiteral("模糊搜尋設定（僅本次執行）"));
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowModality(Qt::WindowModal);
+    auto *layout = new QFormLayout(dialog);
+    const std::array<QString, 6> labels{
+        QStringLiteral("完整檔名加分"), QStringLiteral("檔名開頭加分"),
+        QStringLiteral("詞片段分數"),   QStringLiteral("子序列分數"),
+        QStringLiteral("拼字容錯分數"), QStringLiteral("候選上限")};
+    const std::array<int, 6> values{fuzzy_.weights.exact, fuzzy_.weights.prefix,
+                                    fuzzy_.weights.token, fuzzy_.weights.subsequence,
+                                    fuzzy_.weights.typo,  static_cast<int>(fuzzy_.candidate_limit)};
+    std::array<QSpinBox *, 6> fields{};
+    for (std::size_t i = 0; i < fields.size(); ++i) {
+        fields[i] = new QSpinBox(dialog);
+        fields[i]->setObjectName(QStringLiteral("fuzzyValue%1").arg(i));
+        fields[i]->setRange(i == 5 ? 1 : 0, 10000);
+        fields[i]->setValue(values[i]);
+        layout->addRow(labels[i], fields[i]);
+    }
+    auto *note = new QLabel(QStringLiteral("分數越高越優先；容錯分數會扣除編輯次數。超過候選上限會"
+                                           "回報錯誤，請縮小查詢。設定不會保存。"),
+                            dialog);
+    note->setWordWrap(true);
+    layout->addRow(note);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
+    layout->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    connect(dialog, &QDialog::accepted, this, [this, fields] {
+        fuzzy_.weights = {fields[0]->value(), fields[1]->value(), fields[2]->value(),
+                          fields[3]->value(), fields[4]->value()};
+        fuzzy_.candidate_limit = static_cast<std::size_t>(fields[5]->value());
+        schedule();
+    });
+    dialog->open();
 }
 
 void SearchWindow::showReply(const SearchReply &reply) {
