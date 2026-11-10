@@ -101,7 +101,8 @@ Tests set TEMP/TMP to build/test-temp and create only generated fixtures. Window
 combined ASan/UBSan is unsupported by these presets; no local sanitizer or new
 manual Linux result is claimed. No native Windows screenshot is claimed for this
 slice; the Qt interaction suite uses the minimal platform with process-local
-clipboard. Hosted acceptance has not yet been recorded for this revision.
+clipboard. Hosted desktop acceptance remains pending; core/sanitizer evidence
+is recorded below.
 
 ## Remaining Phase 2 work
 
@@ -120,3 +121,36 @@ intentionally use the exact indexed normalized path without live-source resoluti
 so offline search works. Resolve the synthetic workspace before creating roots,
 retain the same root-equality assertion and add values on failure. No application
 contract or matching code was relaxed. The first Windows run is not a pass.
+
+
+Verified application/test revision: `031a91eddc3e7f0451dd0f5f490d52f7af5e272b`.
+[Corrected run 42770099929](https://github.com/Rex60309/FileWeaver/actions/runs/42770099929)
+reports these completed jobs:
+
+| Hosted check | Observed result |
+| --- | --- |
+| Windows 2022 / MSVC core Debug | 12/12 passed, 75.56 seconds |
+| Windows 2022 / MSVC core Release | 12/12 passed, 54.04 seconds |
+| Existing Clang analysis/format/lint job | Passed |
+| Existing Clang ASan/UBSan CTest | 12/12 passed, 103.88 seconds |
+| Existing Ubuntu core Debug/Release job | Passed |
+| Windows desktop | Still compiling Qt dependencies; final result pending |
+
+The runner log confirmed its temporary directory uses a Windows 8.3 alias. The
+resolved-workspace correction passed the original root assertion on MSVC Debug
+and Release. Locally, after this Python-fixture-only correction, these focused
+checks all passed; C++ application/test code and the measured Release binary were
+unchanged from the fully tested implementation:
+
+```powershell
+ctest --preset debug -R fuzzy-contract --output-on-failure
+ctest --preset release -R fuzzy-contract --output-on-failure
+ctest --preset desktop-debug -R fuzzy-contract --output-on-failure
+ctest --preset desktop-release -R fuzzy-contract --output-on-failure
+```
+
+The superseded initial fuzzy run was cancelled after the corrected full workflow
+started, avoiding duplicate Qt compilation. Its Windows failure remains recorded
+above; no assertion or check was skipped in the corrected workflow. This final
+follow-up changes Markdown only and uses [skip ci] to avoid another unchanged Qt
+build. It does not claim a completed hosted desktop check or release readiness.
