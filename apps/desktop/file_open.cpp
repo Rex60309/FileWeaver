@@ -4,9 +4,12 @@
 #include <QThread>
 #include <array>
 #include <exception>
+#include <memory>
 #include <objbase.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <windows.h>
 
@@ -21,13 +24,13 @@ QString inspectFile(const QString &path, const std::stop_token &stop) {
     const auto drive = GetDriveTypeW(root.c_str());
     if (drive != DRIVE_FIXED && drive != DRIVE_REMOVABLE && drive != DRIVE_CDROM &&
         drive != DRIVE_RAMDISK) {
-        return QStringLiteral("此版本只開啟本機磁碟上的檔案，請確認磁碟仍可使用。");
+        return QStringLiteral("此版本只處理本機磁碟上的檔案，請確認磁碟仍可使用。");
     }
     const auto parts = path.mid(3).split(u'\\');
     QString current = path.left(2);
     for (qsizetype i = 0; i < parts.size(); ++i) {
         if (stop.stop_requested()) {
-            return QStringLiteral("已取消開啟。");
+            return QStringLiteral("已取消檔案操作。");
         }
         current += u'\\' + parts[i];
         const auto native = current.toStdWString();
@@ -41,7 +44,7 @@ QString inspectFile(const QString &path, const std::stop_token &stop) {
         }
         if ((attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
             return QStringLiteral(
-                "此版本不開啟含有符號連結、junction 或其他 reparse point 的路徑。");
+                "此版本不處理含有符號連結、junction 或其他 reparse point 的路徑。");
         }
         const bool directory = (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
         if (directory != (i + 1 < parts.size())) {
@@ -54,16 +57,53 @@ QString inspectFile(const QString &path, const std::stop_token &stop) {
     return {};
 }
 
-QString launchFile(const QString &path) {
-    const auto initialized =
-        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-    if (FAILED(initialized)) {
-        return QStringLiteral("無法初始化 Windows 開啟介面（錯誤 %1）。")
-            .arg(static_cast<unsigned long>(initialized));
+class ShellApartment {
+  public:
+    ShellApartment()
+        : result_(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)) {}
+    ~ShellApartment() {
+        if (SUCCEEDED(result_)) {
+            CoUninitialize();
+        }
     }
-    struct Apartment {
-        ~Apartment() { CoUninitialize(); }
-    } apartment;
+    ShellApartment(const ShellApartment &) = delete;
+    ShellApartment &operator=(const ShellApartment &) = delete;
+    [[nodiscard]] QString error() const {
+        return FAILED(result_) ? QStringLiteral("無法初始化 Windows 檔案介面（錯誤 %1）。")
+                                     .arg(static_cast<unsigned long>(result_))
+                               : QString{};
+    }
+
+  private:
+    HRESULT result_;
+};
+
+QString revealFile(const QString &path) {
+    const ShellApartment apartment;
+    if (!apartment.error().isEmpty()) {
+        return apartment.error();
+    }
+    const auto native = path.toStdWString();
+    PIDLIST_ABSOLUTE raw = nullptr;
+    const auto parsed = SHParseDisplayName(native.c_str(), nullptr, &raw, 0, nullptr);
+    using ItemId =
+        std::unique_ptr<std::remove_pointer_t<PIDLIST_ABSOLUTE>, decltype(&CoTaskMemFree)>;
+    const ItemId item(raw, CoTaskMemFree);
+    if (FAILED(parsed) || item == nullptr) {
+        return QStringLiteral("無法取得檔案總管位置，請更新索引並檢查檔案（錯誤 %1）。")
+            .arg(static_cast<unsigned long>(parsed));
+    }
+    const auto shown = SHOpenFolderAndSelectItems(item.get(), 0, nullptr, 0);
+    return FAILED(shown) ? QStringLiteral("無法交由檔案總管顯示位置（錯誤 %1），請稍後重試。")
+                               .arg(static_cast<unsigned long>(shown))
+                         : QString{};
+}
+
+QString launchFile(const QString &path) {
+    const ShellApartment apartment;
+    if (!apartment.error().isEmpty()) {
+        return apartment.error();
+    }
     std::array<wchar_t, MAX_PATH + 1> directory{};
     const auto length = GetSystemDirectoryW(directory.data(), static_cast<UINT>(directory.size()));
     if (length == 0 || length >= directory.size()) {
@@ -91,10 +131,10 @@ QString launchFile(const QString &path) {
 }
 } // namespace
 
-QString fileOpenPolicyError(const QString &path) {
+QString fileLocationPolicyError(const QString &path) {
     if (path.isEmpty() || path.size() > 32760 || QString::fromUtf8(path.toUtf8()) != path ||
         path.contains(QChar{0})) {
-        return QStringLiteral("路徑無效或過長，未送出開啟請求。");
+        return QStringLiteral("路徑無效或過長，未送出檔案操作請求。");
     }
     if (path.size() < 4 ||
         !((path[0] >= u'A' && path[0] <= u'Z') || (path[0] >= u'a' && path[0] <= u'z')) ||
@@ -126,6 +166,15 @@ QString fileOpenPolicyError(const QString &path) {
             return QStringLiteral("不支援 Windows 保留的裝置名稱。");
         }
     }
+    return {};
+}
+
+QString fileOpenPolicyError(const QString &path) {
+    auto error = fileLocationPolicyError(path);
+    if (!error.isEmpty()) {
+        return error;
+    }
+    const auto parts = path.mid(3).split(u'\\');
     const auto extension = parts.last().section(u'.', -1).toLower();
     const QStringList supported{
         QStringLiteral("txt"),  QStringLiteral("md"),   QStringLiteral("pdf"),
@@ -143,16 +192,19 @@ QString fileOpenPolicyError(const QString &path) {
 }
 
 FileOpenApi windowsFileOpenApi() { return {inspectFile, launchFile}; }
+FileOpenApi windowsRevealFileApi() { return {inspectFile, revealFile}; }
 
-OpenReply openFileWithApi(const QString &path, const std::stop_token &stop,
-                          const FileOpenApi &api) {
+namespace {
+OpenReply performAction(const QString &path, const std::stop_token &stop, const FileOpenApi &api,
+                        FileAction action) {
     const auto cancelled = [] {
-        return OpenReply{OpenState::cancelled, QStringLiteral("已取消開啟。")};
+        return OpenReply{OpenState::cancelled, QStringLiteral("已取消檔案操作。")};
     };
     if (stop.stop_requested()) {
         return cancelled();
     }
-    const auto policy = fileOpenPolicyError(path);
+    const auto policy =
+        action == FileAction::open ? fileOpenPolicyError(path) : fileLocationPolicyError(path);
     if (!policy.isEmpty()) {
         return {OpenState::failed, policy};
     }
@@ -167,19 +219,37 @@ OpenReply openFileWithApi(const QString &path, const std::stop_token &stop,
         return {OpenState::failed, inspected};
     }
     const auto error = api.launch(path);
+    if (error.isEmpty() && action == FileAction::reveal) {
+        return {OpenState::handed_off,
+                QStringLiteral("已請求檔案總管顯示並選取檔案；不代表視窗已切到前景。")};
+    }
     return error.isEmpty()
                ? OpenReply{OpenState::handed_off,
                            QStringLiteral("已交由 Windows 預設程式處理；不代表檔案已成功顯示。")}
                : OpenReply{OpenState::failed, error};
 }
 
+} // namespace
+
+OpenReply openFileWithApi(const QString &path, const std::stop_token &stop,
+                          const FileOpenApi &api) {
+    return performAction(path, stop, api, FileAction::open);
+}
+OpenReply revealFileWithApi(const QString &path, const std::stop_token &stop,
+                            const FileOpenApi &api) {
+    return performAction(path, stop, api, FileAction::reveal);
+}
+OpenReply revealSelectedFile(const QString &path, const std::stop_token &stop) {
+    return revealFileWithApi(path, stop, windowsRevealFileApi());
+}
+
 OpenReply openSelectedFile(const QString &path, const std::stop_token &stop) {
     return openFileWithApi(path, stop, windowsFileOpenApi());
 }
 
-FileOpenController::FileOpenController(Open open, QObject *parent)
-    : QObject(parent), open_(std::move(open)) {
-    if (!open_) {
+FileOpenController::FileOpenController(Open open, QObject *parent, Open reveal)
+    : QObject(parent), open_(std::move(open)), reveal_(std::move(reveal)) {
+    if (!open_ || !reveal_) {
         throw std::invalid_argument("File opening requires an open function");
     }
     qRegisterMetaType<OpenReply>();
@@ -193,7 +263,7 @@ FileOpenController::~FileOpenController() {
     worker_.join();
 }
 
-bool FileOpenController::submit(QString path) {
+bool FileOpenController::submit(QString path, FileAction action) {
     Q_ASSERT(QThread::currentThread() == thread());
     if (busy_) {
         return false;
@@ -201,7 +271,7 @@ bool FileOpenController::submit(QString path) {
     {
         const std::lock_guard lock(mutex_);
         operation_stop_ = std::stop_source{};
-        pending_ = std::move(path);
+        pending_ = Job{std::move(path), action};
     }
     busy_ = true;
     ready_.notify_one();
@@ -226,17 +296,18 @@ void FileOpenController::run(const std::stop_token &stop) {
         if (!pending_) {
             continue;
         }
-        const auto path = std::move(*pending_);
+        const auto job = std::move(*pending_);
         pending_.reset();
         const auto operation_stop = operation_stop_.get_token();
         lock.unlock();
         OpenReply reply;
         try {
-            reply = open_(path, operation_stop);
+            reply = (job.action == FileAction::open ? open_ : reveal_)(job.path, operation_stop);
         } catch (const std::exception &error) {
             reply = {OpenState::failed, QString::fromUtf8(error.what()).left(4096)};
         } catch (...) {
-            reply = {OpenState::failed, QStringLiteral("開啟請求發生未知錯誤，請稍後手動重試。")};
+            reply = {OpenState::failed,
+                     QStringLiteral("檔案操作請求發生未知錯誤，請稍後手動重試。")};
         }
         if (!stop.stop_requested()) {
             QMetaObject::invokeMethod(

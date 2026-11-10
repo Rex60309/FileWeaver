@@ -23,7 +23,8 @@ class SearchWindow final : public QWidget {
   public:
     explicit SearchWindow(SearchController::Search search = fileweaver::search_files,
                           QWidget *parent = nullptr, HotkeyApi hotkey_api = windowsHotkeyApi(),
-                          FileOpenController::Open open_file = openSelectedFile);
+                          FileOpenController::Open open_file = openSelectedFile,
+                          FileOpenController::Open reveal_file = revealSelectedFile);
     void setDatabase(const QString &path);
 
   protected:
@@ -39,7 +40,7 @@ class SearchWindow final : public QWidget {
     void activateSearch();
     void updateHotkey(bool enabled);
     void copyPath();
-    void requestOpenSelected();
+    void requestSelected(FileAction action);
     QString database_;
     // Non-owning pointers: widgets/model are owned immediately by their Qt parent.
     QLineEdit *database_path_;
@@ -51,6 +52,7 @@ class SearchWindow final : public QWidget {
     QStandardItemModel *model_;
     QPushButton *copy_;
     QPushButton *open_;
+    QPushButton *reveal_;
     QPointer<QDialog> confirmation_;
     QCheckBox *hotkey_enabled_;
     QKeySequenceEdit *hotkey_sequence_;

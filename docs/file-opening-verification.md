@@ -132,3 +132,7 @@ The final follow-up changes Markdown only and uses `[skip ci]` to avoid repeatin
 the unchanged Qt dependency build. Application code, workflow, dependency manifest
 and tests remain identical to the fully verified implementation revision above.
 No failing test was bypassed. git diff --check passed for the documentation update.
+
+Follow-up: the separately authorized all-extension Explorer selection slice is
+documented in [file-reveal-verification.md](file-reveal-verification.md); it does
+not expand the supported-file opening allowlist.

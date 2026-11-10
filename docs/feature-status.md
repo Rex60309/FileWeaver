@@ -51,6 +51,7 @@ Further work is prioritized for Windows; release packaging is out of scope.
 | 2 | Opt-in Windows Qt index chooser/search window, bounded async worker, keyboard selection and explicit path copy | Tested |
 | 2 | Opt-in configurable Windows global hotkey, collision handling and search focus | Tested |
 | 2 | Confirmed opening of selected supported Windows local files | Tested |
+| 2 | Confirmed Windows Explorer reveal of selected local files, all extensions | Tested |
 | 2 | Fuzzy ranking, watchers and safe preview | Planned |
 | 3 | Analysis, duplicates, organizer, rename, journal | Planned |
 | 4 | Project launcher, opt-in clipboard, activity | Planned |

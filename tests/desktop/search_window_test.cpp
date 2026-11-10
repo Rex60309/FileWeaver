@@ -34,6 +34,7 @@
 #include <thread>
 #include <windows.h>
 
+using fileweaver::desktop::FileAction;
 using fileweaver::desktop::FileOpenApi;
 using fileweaver::desktop::FileOpenController;
 using fileweaver::desktop::GlobalHotkey;
@@ -61,6 +62,114 @@ fileweaver::SearchResult record(const std::string &name) {
 class DesktopTests final : public QObject {
     Q_OBJECT
   private slots:
+    void revealPolicyAndCancellation() {
+        int handed = 0;
+        FileOpenApi api{[](const auto &, const auto &) { return QString{}; },
+                        [&](const auto &) {
+                            ++handed;
+                            return QString{};
+                        }};
+        for (const auto &name : {"tool.exe", "script.cmd", "script.ps1", "link.lnk", "link.url",
+                                 "noextension", "archive.rar"}) {
+            const auto path = QStringLiteral("C:\\資料 日本語😀\\") + QString::fromLatin1(name);
+            QVERIFY(!fileweaver::desktop::fileOpenPolicyError(path).isEmpty());
+            QVERIFY(fileweaver::desktop::revealFileWithApi(path, {}, api).state ==
+                    OpenState::handed_off);
+        }
+        QCOMPARE(handed, 7);
+        for (const auto &path : {"https://example.invalid/file.exe", "\\\\server\\share\\file.exe",
+                                 "C:\\file.exe:stream", "C:\\..\\file.exe", "C:\\NUL.exe"}) {
+            QVERIFY(
+                fileweaver::desktop::revealFileWithApi(QString::fromLatin1(path), {}, api).state ==
+                OpenState::failed);
+        }
+        std::stop_source stopped;
+        stopped.request_stop();
+        QVERIFY(fileweaver::desktop::revealFileWithApi(QStringLiteral("C:\\file.exe"),
+                                                       stopped.get_token(), api)
+                    .state == OpenState::cancelled);
+        FileOpenApi interrupted{[&](const auto &, const auto &) {
+                                    stopped.request_stop();
+                                    return QString{};
+                                },
+                                api.launch};
+        stopped = std::stop_source{};
+        QVERIFY(fileweaver::desktop::revealFileWithApi(QStringLiteral("C:\\file.exe"),
+                                                       stopped.get_token(), interrupted)
+                    .state == OpenState::cancelled);
+        FileOpenApi missing{[](const auto &, const auto &) { return QStringLiteral("missing"); },
+                            api.launch};
+        QVERIFY(fileweaver::desktop::revealFileWithApi(QStringLiteral("C:\\file.exe"), {}, missing)
+                    .state == OpenState::failed);
+        FileOpenApi failed{api.inspect,
+                           [](const auto &) { return QStringLiteral("shell failure"); }};
+        QCOMPARE(fileweaver::desktop::revealFileWithApi(QStringLiteral("C:\\file.exe"), {}, failed)
+                     .message,
+                 QStringLiteral("shell failure"));
+        QCOMPARE(handed, 7);
+    }
+
+    void revealConfirmationRoutesOnlyAfterApproval() {
+        std::atomic<int> opened = 0;
+        std::atomic<int> revealed = 0;
+        QString target;
+        SearchWindow window(
+            [](const auto &, const auto &) {
+                return std::vector<fileweaver::SearchResult>{record("工具_日本語😀.exe"),
+                                                             record("second.txt")};
+            },
+            nullptr, fileweaver::desktop::windowsHotkeyApi(),
+            [&](const auto &, const auto &) {
+                ++opened;
+                return OpenReply{};
+            },
+            [&](const QString &path, const auto &) {
+                target = path;
+                ++revealed;
+                return OpenReply{OpenState::handed_off, QStringLiteral("synthetic reveal")};
+            });
+        window.show();
+        auto *query = control<QLineEdit>(window, "query");
+        auto *tree = control<QTreeView>(window, "results");
+        auto *reveal = control<QPushButton>(window, "revealFile");
+        QVERIFY(!reveal->isEnabled());
+        window.setDatabase(QStringLiteral("C:/synthetic/index.sqlite"));
+        query->setText(QStringLiteral("tool"));
+        QTRY_COMPARE(tree->model()->rowCount(), 2);
+        QTest::keyClick(tree, Qt::Key_Return); // Executable stays blocked for opening.
+        QVERIFY(window.findChild<QDialog *>() == nullptr);
+        QTest::mouseClick(reveal, Qt::LeftButton);
+        auto *dialog = window.findChild<QDialog *>(QStringLiteral("revealConfirmation"));
+        QVERIFY(dialog != nullptr);
+        QVERIFY(!reveal->isEnabled());
+        QVERIFY(!control<QPushButton>(window, "openFile")->isEnabled());
+        auto *buttons =
+            dialog->findChild<QDialogButtonBox *>(QStringLiteral("revealConfirmationButtons"));
+        QVERIFY(buttons != nullptr);
+        QVERIFY(buttons->button(QDialogButtonBox::Cancel)->isDefault());
+        const auto expected = QStringLiteral("C:\\synthetic\\工具_日本語😀.exe");
+        QCOMPARE(dialog->findChild<QPlainTextEdit *>(QStringLiteral("revealTarget"))->toPlainText(),
+                 expected);
+        QTest::keyClick(dialog, Qt::Key_Return);
+        QTRY_VERIFY(window.findChild<QDialog *>() == nullptr);
+        QCOMPARE(revealed.load(), 0);
+        tree->setFocus();
+        QTest::keyClick(tree, Qt::Key_Return, Qt::ControlModifier);
+        dialog = window.findChild<QDialog *>(QStringLiteral("revealConfirmation"));
+        QVERIFY(dialog != nullptr);
+        tree->setCurrentIndex(tree->model()->index(1, 0));
+        buttons =
+            dialog->findChild<QDialogButtonBox *>(QStringLiteral("revealConfirmationButtons"));
+        QTest::mouseClick(buttons->button(QDialogButtonBox::Open), Qt::LeftButton);
+        QTRY_VERIFY(
+            control<QLabel>(window, "status")->text().contains(QStringLiteral("synthetic reveal")));
+        QCOMPARE(revealed.load(), 1);
+        QCOMPARE(opened.load(), 0);
+        QCOMPARE(target, expected);
+        query->clear();
+        QVERIFY(!reveal->isEnabled());
+    }
+
     void fileOpeningPolicyCancellationAndErrors() {
         int inspected = 0;
         int launched = 0;
@@ -143,12 +252,18 @@ class DesktopTests final : public QObject {
         };
         QVERIFY(fileweaver::desktop::openFileWithApi(native(file), {}, api).state ==
                 OpenState::handed_off);
-        QCOMPARE(launches, 1);
+        QVERIFY(fileweaver::desktop::revealFileWithApi(native(file), {}, api).state ==
+                OpenState::handed_off);
+        QCOMPARE(launches, 2);
         std::filesystem::remove(file);
         QVERIFY(fileweaver::desktop::openFileWithApi(native(file), {}, api).state ==
                 OpenState::failed);
+        QVERIFY(fileweaver::desktop::revealFileWithApi(native(file), {}, api).state ==
+                OpenState::failed);
         std::filesystem::create_directory(file);
         QVERIFY(fileweaver::desktop::openFileWithApi(native(file), {}, api).state ==
+                OpenState::failed);
+        QVERIFY(fileweaver::desktop::revealFileWithApi(native(file), {}, api).state ==
                 OpenState::failed);
         std::filesystem::remove(file);
         {
@@ -160,7 +275,7 @@ class DesktopTests final : public QObject {
         QVERIFY(
             fileweaver::desktop::openFileWithApi(native(link / file.filename()), {}, api).state ==
             OpenState::failed);
-        QCOMPARE(launches, 1);
+        QCOMPARE(launches, 2);
         QCOMPARE(std::filesystem::file_size(file), std::uintmax_t{9});
     }
 
@@ -240,10 +355,10 @@ class DesktopTests final : public QObject {
             exited = true;
             return OpenReply{OpenState::cancelled, QStringLiteral("synthetic cancel")};
         };
-        auto controller = std::make_unique<FileOpenController>(cancelable);
+        auto controller = std::make_unique<FileOpenController>(cancelable, nullptr, cancelable);
         QVERIFY(controller->submit(QStringLiteral("C:\\first.txt")));
         QTRY_VERIFY(entered.load());
-        QVERIFY(!controller->submit(QStringLiteral("C:\\second.txt")));
+        QVERIFY(!controller->submit(QStringLiteral("C:\\second.txt"), FileAction::reveal));
         bool heartbeat = false;
         QTimer::singleShot(0, controller.get(), [&] { heartbeat = true; });
         QTRY_VERIFY(heartbeat);
@@ -252,10 +367,16 @@ class DesktopTests final : public QObject {
         QTRY_COMPARE(completed.count(), 1);
         QVERIFY(exited.load());
         QVERIFY(!controller->isBusy());
+        entered = false;
+        QVERIFY(controller->submit(QStringLiteral("C:\\revealed.exe"), FileAction::reveal));
+        QTRY_VERIFY(entered.load());
+        QVERIFY(!controller->submit(QStringLiteral("C:\\blocked.txt")));
+        controller->cancel();
+        QTRY_COMPARE(completed.count(), 2);
         controller.reset();
         entered = false;
         exited = false;
-        controller = std::make_unique<FileOpenController>(cancelable);
+        controller = std::make_unique<FileOpenController>(cancelable, nullptr, cancelable);
         QVERIFY(controller->submit(QStringLiteral("C:\\closing.txt")));
         QTRY_VERIFY(entered.load());
         controller.reset();

@@ -50,9 +50,9 @@ QString parentText(const QString &path) {
 } // namespace
 
 SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, HotkeyApi hotkey_api,
-                           FileOpenController::Open open_file)
+                           FileOpenController::Open open_file, FileOpenController::Open reveal_file)
     : QWidget(parent), hotkey_(std::move(hotkey_api)), controller_(std::move(search)),
-      opener_(std::move(open_file)) {
+      opener_(std::move(open_file), nullptr, std::move(reveal_file)) {
     setWindowTitle(QStringLiteral("FileWeaver — 檔名搜尋"));
     setWindowIcon(style()->standardIcon(QStyle::SP_FileDialogContentsView));
     resize(1000, 650);
@@ -153,11 +153,15 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     open_->setEnabled(false);
     selection_row->addWidget(selected_path_, 1);
     selection_row->addWidget(open_);
+    reveal_ = new QPushButton(QStringLiteral("顯示所在位置…"), this);
+    reveal_->setObjectName(QStringLiteral("revealFile"));
+    reveal_->setEnabled(false);
+    selection_row->addWidget(reveal_);
     selection_row->addWidget(copy_);
     layout->addLayout(selection_row.release());
-    layout->addWidget(new QLabel(
-        QStringLiteral("↓ 進入結果 · ↑ ↓ 選取 · Enter 開啟確認 · Ctrl+C 複製路徑 · Esc 關閉"),
-        this));
+    layout->addWidget(new QLabel(QStringLiteral("↓ 進入結果 · ↑ ↓ 選取 · Enter 開啟確認 · "
+                                                "Ctrl+Enter 顯示位置 · Ctrl+C 複製路徑 · Esc 關閉"),
+                                 this));
     auto *note =
         new QLabel(QStringLiteral("結果來自索引；檔案變更後請更新索引。最多顯示 100 筆。"), this);
     note->setWordWrap(true);
@@ -170,10 +174,12 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     connect(query_, &QLineEdit::returnPressed, this, &SearchWindow::searchNow);
     connect(search_button, &QPushButton::clicked, this, &SearchWindow::searchNow);
     connect(copy_, &QPushButton::clicked, this, &SearchWindow::copyPath);
-    connect(open_, &QPushButton::clicked, this, &SearchWindow::requestOpenSelected);
-    connect(results_, &QTreeView::doubleClicked, this, [this] { requestOpenSelected(); });
+    connect(open_, &QPushButton::clicked, this, [this] { requestSelected(FileAction::open); });
+    connect(reveal_, &QPushButton::clicked, this, [this] { requestSelected(FileAction::reveal); });
+    connect(results_, &QTreeView::doubleClicked, this,
+            [this] { requestSelected(FileAction::open); });
     connect(&opener_, &FileOpenController::completed, this, [this](const OpenReply &reply) {
-        status_->setText(QStringLiteral("上次開啟請求：") + preview(reply.message, 512));
+        status_->setText(QStringLiteral("上次檔案操作：") + preview(reply.message, 512));
         selectResult();
     });
     connect(choose, &QPushButton::clicked, this, [this] {
@@ -230,6 +236,7 @@ void SearchWindow::clearResults() {
     selected_path_->clear();
     copy_->setEnabled(false);
     open_->setEnabled(false);
+    reveal_->setEnabled(false);
 }
 
 void SearchWindow::schedule() {
@@ -299,9 +306,10 @@ void SearchWindow::selectResult() {
     selected_path_->setText(preview(path, 2048));
     copy_->setEnabled(!path.isEmpty());
     open_->setEnabled(!path.isEmpty() && !opener_.isBusy() && confirmation_.isNull());
+    reveal_->setEnabled(open_->isEnabled());
 }
 
-void SearchWindow::requestOpenSelected() {
+void SearchWindow::requestSelected(FileAction action) {
     if (opener_.isBusy() || !confirmation_.isNull()) {
         return;
     }
@@ -310,30 +318,38 @@ void SearchWindow::requestOpenSelected() {
         return;
     }
     const auto path = model_->index(current.row(), 0).data(Qt::UserRole).toString();
-    const auto error = fileOpenPolicyError(path);
+    const bool reveal = action == FileAction::reveal;
+    const auto error = reveal ? fileLocationPolicyError(path) : fileOpenPolicyError(path);
     if (!error.isEmpty()) {
         status_->setText(error);
         return;
     }
     auto *dialog = new QDialog(this);
-    dialog->setObjectName(QStringLiteral("openConfirmation"));
-    dialog->setWindowTitle(QStringLiteral("確認開啟檔案"));
+    dialog->setObjectName(reveal ? QStringLiteral("revealConfirmation")
+                                 : QStringLiteral("openConfirmation"));
+    dialog->setWindowTitle(reveal ? QStringLiteral("確認顯示所在位置")
+                                  : QStringLiteral("確認開啟檔案"));
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     dialog->setWindowModality(Qt::WindowModal);
     dialog->resize(640, 260);
     auto *layout = new QVBoxLayout(dialog);
-    auto *label = new QLabel(QStringLiteral("要將下列檔案交由 Windows 預設程式開啟嗎？"), dialog);
+    auto *label =
+        new QLabel(reveal ? QStringLiteral("要在檔案總管選取下列檔案嗎？此動作不執行檔案。")
+                          : QStringLiteral("要將下列檔案交由 Windows 預設程式開啟嗎？"),
+                   dialog);
     label->setWordWrap(true);
     layout->addWidget(label);
     auto *target = new QPlainTextEdit(dialog);
-    target->setObjectName(QStringLiteral("openTarget"));
-    target->setAccessibleName(QStringLiteral("即將開啟的完整路徑"));
+    target->setObjectName(reveal ? QStringLiteral("revealTarget") : QStringLiteral("openTarget"));
+    target->setAccessibleName(QStringLiteral("即將處理的完整路徑"));
     target->setReadOnly(true);
     target->setPlainText(path);
     layout->addWidget(target, 1);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Open | QDialogButtonBox::Cancel, dialog);
-    buttons->setObjectName(QStringLiteral("openConfirmationButtons"));
-    buttons->button(QDialogButtonBox::Open)->setText(QStringLiteral("開啟"));
+    buttons->setObjectName(reveal ? QStringLiteral("revealConfirmationButtons")
+                                  : QStringLiteral("openConfirmationButtons"));
+    buttons->button(QDialogButtonBox::Open)
+        ->setText(reveal ? QStringLiteral("顯示位置") : QStringLiteral("開啟"));
     buttons->button(QDialogButtonBox::Open)->setAutoDefault(false);
     auto *cancel = buttons->button(QDialogButtonBox::Cancel);
     cancel->setText(QStringLiteral("取消"));
@@ -341,9 +357,9 @@ void SearchWindow::requestOpenSelected() {
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
-    connect(dialog, &QDialog::accepted, this, [this, path] {
-        if (opener_.submit(path)) {
-            status_->setText(QStringLiteral("正在檢查並送出開啟請求…"));
+    connect(dialog, &QDialog::accepted, this, [this, path, action] {
+        if (opener_.submit(path, action)) {
+            status_->setText(QStringLiteral("正在檢查並送出檔案操作請求…"));
         }
     });
     connect(dialog, &QDialog::finished, this, [this] {
@@ -378,8 +394,10 @@ bool SearchWindow::eventFilter(QObject *watched, QEvent *event) {
     if (watched == results_ && event->type() == QEvent::KeyPress) {
         const auto *key = static_cast<QKeyEvent *>(event);
         if ((key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) &&
-            (key->modifiers() & ~Qt::KeypadModifier) == Qt::NoModifier) {
-            requestOpenSelected();
+            ((key->modifiers() & ~Qt::KeypadModifier) == Qt::NoModifier ||
+             (key->modifiers() & ~Qt::KeypadModifier) == Qt::ControlModifier)) {
+            requestSelected(key->modifiers().testFlag(Qt::ControlModifier) ? FileAction::reveal
+                                                                           : FileAction::open);
             return true;
         }
     }
