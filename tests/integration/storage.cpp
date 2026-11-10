@@ -6,6 +6,7 @@
 #include "fileweaver/application/search.hpp"
 #include "fileweaver/core/storage_error.hpp"
 #include "fileweaver/core/utc_time.hpp"
+#include "fileweaver/core/watch_schedule.hpp"
 #include "fileweaver/filesystem/scan.hpp"
 #include "output.hpp"
 #include <catch2/catch_test_macros.hpp>
@@ -1943,4 +1944,83 @@ TEST_CASE("Fuzzy search ranks a filtered snapshot with deterministic ties and ca
     request.sort = fileweaver::SearchSort::relevance;
     request.mode = fileweaver::SearchMode::substring;
     REQUIRE_THROWS_AS(fileweaver::search_files(request), fileweaver::StorageError);
+}
+
+TEST_CASE("Watch schedule bounds bursts and reconciles silent gaps with monotonic time") {
+    using namespace std::chrono_literals;
+    const auto begin = fileweaver::WatchSchedule::Time{};
+    fileweaver::WatchSchedule schedule(begin);
+    REQUIRE(schedule.due(begin));
+    schedule.completed(begin, true);
+    REQUIRE_FALSE(schedule.due(begin + 59s));
+    REQUIRE(schedule.due(begin + 60s));
+    schedule.changed(begin + 1s);
+    REQUIRE_FALSE(schedule.due(begin + 1499ms));
+    REQUIRE(schedule.due(begin + 1500ms));
+    schedule.changed(begin + 1400ms);
+    schedule.changed(begin + 1800ms);
+    schedule.changed(begin + 2900ms);
+    REQUIRE_FALSE(schedule.due(begin + 2999ms));
+    REQUIRE(schedule.due(begin + 3s)); // Max 2 s from first event.
+    schedule.completed(begin + 3s, false);
+    schedule.urgent(begin + 4s);
+    REQUIRE_FALSE(schedule.due(begin + 7999ms));
+    REQUIRE(schedule.due(begin + 8s));
+    schedule.completed(begin + 8s, true);
+    schedule.urgent(begin + 9s);
+    REQUIRE(schedule.due(begin + 9s));
+}
+
+TEST_CASE("Single-root refresh preserves policy, scope and registration identity") {
+    Fixture fixture;
+    const auto a = fixture.directory / "A";
+    const auto b = fixture.directory / "B";
+    std::filesystem::create_directories(a / "skip");
+    std::filesystem::create_directory(b);
+    {
+        std::ofstream(a / "one.txt") << "old";
+        std::ofstream(b / "other.txt") << "old";
+    }
+    fileweaver::initialize_database(fixture.path());
+    const auto clock = [] { return std::int64_t{1700000000000000000}; };
+    fileweaver::IndexRequest first{fixture.path(), a, {{a / "skip"}, 3}};
+    REQUIRE(fileweaver::index_directory(first, clock).scan.complete);
+    REQUIRE(fileweaver::index_directory({fixture.path(), b, {}}, clock).scan.complete);
+    const auto roots = fileweaver::list_roots(fixture.path());
+    REQUIRE(roots.size() == 2);
+    fileweaver::RootRefreshRequest request{fixture.path(), roots[0].root_id,
+                                           std::filesystem::canonical(a)};
+    {
+        std::ofstream(a / "new.txt") << "new";
+        std::ofstream(a / "skip" / "secret.txt") << "secret";
+        std::ofstream(b / "unscanned.txt") << "new";
+    }
+    std::filesystem::remove(a / "one.txt");
+    auto result = fileweaver::refresh_root(request, clock);
+    REQUIRE(result.exit_code == 0);
+    const auto &indexed = require_index(result);
+    REQUIRE(indexed.added == 1);
+    REQUIRE(indexed.missing == 0);
+    REQUIRE_FALSE(indexed.missing_reconciled);
+    REQUIRE(fileweaver::search_files({fixture.path(), "one.txt"}).size() == 1);
+    REQUIRE(fileweaver::search_files({fixture.path(), "new.txt"}).size() == 1);
+    REQUIRE(fileweaver::search_files({fixture.path(), "secret"}).empty());
+    REQUIRE(fileweaver::search_files({fixture.path(), "unscanned"}).empty());
+    const auto count = fileweaver::catalog_status(fixture.path()).scan_records;
+    request.expected_root = b;
+    REQUIRE_THROWS_AS(fileweaver::refresh_root(request, clock), fileweaver::StorageError);
+    REQUIRE(fileweaver::catalog_status(fixture.path()).scan_records == count);
+    request.expected_root = a;
+    std::stop_source stopped;
+    stopped.request_stop();
+    REQUIRE_FALSE(fileweaver::refresh_root(request, clock, stopped.get_token()).attempted);
+    sql(fixture.path(), "DELETE FROM root_scan_options WHERE root_id=1");
+    result = fileweaver::refresh_root(request, clock);
+    REQUIRE_FALSE(result.attempted);
+    REQUIRE(result.exit_code == 5);
+    REQUIRE(fileweaver::catalog_status(fixture.path()).scan_records == count);
+    request.root_id = 99999;
+    REQUIRE_THROWS_AS(fileweaver::refresh_root(request, clock), fileweaver::StorageError);
+    request.root_id = 0;
+    REQUIRE_THROWS_AS(fileweaver::refresh_root(request, clock), fileweaver::StorageError);
 }

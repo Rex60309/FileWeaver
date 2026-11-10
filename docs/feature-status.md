@@ -53,7 +53,8 @@ Further work is prioritized for Windows; release packaging is out of scope.
 | 2 | Confirmed opening of selected supported Windows local files | Tested |
 | 2 | Confirmed Windows Explorer reveal of selected local files, all extensions | Tested |
 | 2 | Bounded fuzzy filename matching/ranking, configurable CLI and Windows UI | Tested |
-| 2 | Path matching, watchers and safe preview | Planned |
+| 2 | Opt-in single-root Windows notifications and policy-preserving reconciliation | Tested |
+| 2 | Path matching, multi-root/CLI watch and safe preview | Planned |
 | 3 | Analysis, duplicates, organizer, rename, journal | Planned |
 | 4 | Project launcher, opt-in clipboard, activity | Planned |
 | 5 | Opt-in semantic search, backup and restore | Planned |

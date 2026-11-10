@@ -58,11 +58,291 @@ template <class T> T *control(SearchWindow &window, const char *name) {
 fileweaver::SearchResult record(const std::string &name) {
     return {1, 1, "C:/synthetic/" + name, name, 3};
 }
+class ScriptedChanges final : public fileweaver::desktop::DirectoryChanges {
+  public:
+    explicit ScriptedChanges(
+        std::function<fileweaver::desktop::DirectoryChange(const std::stop_token &)> poll)
+        : poll_(std::move(poll)) {}
+    fileweaver::desktop::DirectoryChange poll(const std::stop_token &stop) override {
+        return poll_(stop);
+    }
+
+  private:
+    std::function<fileweaver::desktop::DirectoryChange(const std::stop_token &)> poll_;
+};
+fileweaver::desktop::DirectoryChange waitForStop(const std::stop_token &stop) {
+    std::mutex mutex;
+    std::condition_variable_any ready;
+    std::unique_lock lock(mutex);
+    ready.wait(lock, stop, [] { return false; });
+    return fileweaver::desktop::DirectoryChange::cancelled;
+}
 } // namespace
 
 class DesktopTests final : public QObject {
     Q_OBJECT
   private slots:
+    void nativeWatchNotificationsAndSafetyGuards() {
+        using fileweaver::desktop::DirectoryChange;
+        QTemporaryDir temporary;
+        QVERIFY(temporary.isValid());
+        const auto base =
+            std::filesystem::canonical(std::filesystem::path(temporary.path().toStdWString()));
+        const auto source = base / std::filesystem::path(u8"監控 日本語😀");
+        std::filesystem::create_directory(source);
+        const auto db = base / "index.sqlite";
+        fileweaver::initialize_database(db);
+        const auto bytes = source.u8string();
+        fileweaver::RootInfo root;
+        root.root_id = 1;
+        root.policy_known = true;
+        root.path = std::string(bytes.begin(), bytes.end());
+        const fileweaver::desktop::WatchTarget target{db, root};
+        const auto a = source / std::filesystem::path(u8"建立😀.txt");
+        const auto b = source / std::filesystem::path(u8"改名_日本語.txt");
+        for (int operation = 0; operation < 4; ++operation) {
+            auto notification = fileweaver::desktop::windowsDirectoryChanges(target);
+            QVERIFY(notification->poll({}) == DirectoryChange::timeout);
+            if (operation == 0) {
+                std::ofstream(a) << "one";
+            } else if (operation == 1) {
+                std::ofstream(a, std::ios::app) << "two";
+            } else if (operation == 2) {
+                std::filesystem::rename(a, b);
+            } else {
+                std::filesystem::remove(b);
+            }
+            bool observed = false;
+            const auto changed = [&] {
+                if (!observed) {
+                    const auto value = notification->poll({});
+                    observed =
+                        value == DirectoryChange::changed || value == DirectoryChange::overflow;
+                }
+                return observed;
+            };
+            QTRY_VERIFY_WITH_TIMEOUT(changed(), 5000);
+            std::stop_source stopped;
+            stopped.request_stop();
+            QVERIFY(notification->poll(stopped.get_token()) == DirectoryChange::cancelled);
+        }
+        auto inside = target;
+        inside.database = source / "inside.sqlite";
+        fileweaver::initialize_database(inside.database);
+        QVERIFY_THROWS_EXCEPTION(
+            std::runtime_error,
+            static_cast<void>(fileweaver::desktop::windowsDirectoryChanges(inside)));
+        const auto alias = source / "db-alias.sqlite";
+        std::filesystem::create_hard_link(db, alias);
+        QVERIFY_THROWS_EXCEPTION(
+            std::runtime_error,
+            static_cast<void>(fileweaver::desktop::windowsDirectoryChanges(target)));
+        std::filesystem::remove(alias);
+        const auto junction = base / "junction";
+        fileweaver::test::directoryLink({source, junction});
+        const auto link_bytes = junction.u8string();
+        auto linked = target;
+        linked.root.path = std::string(link_bytes.begin(), link_bytes.end());
+        QVERIFY_THROWS_EXCEPTION(
+            std::runtime_error,
+            static_cast<void>(fileweaver::desktop::windowsDirectoryChanges(linked)));
+    }
+
+    void watchReconcilesRealSyntheticIndexAndStops() {
+        QTemporaryDir temporary;
+        QVERIFY(temporary.isValid());
+        const auto base =
+            std::filesystem::canonical(std::filesystem::path(temporary.path().toStdWString()));
+        const auto source = base / "source";
+        std::filesystem::create_directories(source / "skip");
+        const auto db = base / "index.sqlite";
+        fileweaver::initialize_database(db);
+        const auto clock = [] { return std::int64_t{1700000000000000000}; };
+        QVERIFY(fileweaver::index_directory({db, source, {}}, clock).scan.complete);
+        const auto root = fileweaver::list_roots(db).at(0);
+        fileweaver::desktop::WatchController watcher;
+        fileweaver::desktop::WatchReply last;
+        connect(&watcher, &fileweaver::desktop::WatchController::updated, this,
+                [&](const auto &reply) { last = reply; });
+        QVERIFY(watcher.start({db, root}));
+        QVERIFY(!watcher.start({db, root}));
+        QTRY_VERIFY_WITH_TIMEOUT(last.scans >= 1, 10000);
+        const auto file = source / "created.txt";
+        {
+            std::ofstream(file) << "one";
+        }
+        const auto found = [&](const char *query) { return fileweaver::search_files({db, query}); };
+        QTRY_COMPARE_WITH_TIMEOUT(found("created").size(), std::size_t{1}, 10000);
+        {
+            std::ofstream(file, std::ios::app) << "two";
+        }
+        QTRY_COMPARE_WITH_TIMEOUT(found("created").at(0).size_bytes, std::int64_t{6}, 10000);
+        std::filesystem::rename(file, source / "renamed.txt");
+        QTRY_COMPARE_WITH_TIMEOUT(found("renamed").size(), std::size_t{1}, 10000);
+        QVERIFY(found("created").empty());
+        std::filesystem::remove(source / "renamed.txt");
+        QTRY_VERIFY_WITH_TIMEOUT(found("renamed").empty(), 10000);
+        QVERIFY(
+            fileweaver::index_directory({db, source, {{source / "skip"}, 3}}, clock).scan.complete);
+        const auto previous = last.scans;
+        {
+            std::ofstream(source / "skip" / "secret.txt") << "secret";
+        }
+        QTRY_VERIFY_WITH_TIMEOUT(last.scans > previous, 10000);
+        QVERIFY(found("secret").empty());
+        QTRY_VERIFY_WITH_TIMEOUT(last.message.contains(QStringLiteral("Missing 尚未核對")), 10000);
+        QVERIFY(last.last_sync.has_value());
+        watcher.cancel();
+        QTRY_VERIFY(!watcher.isBusy());
+        {
+            std::ofstream(source / "stopped.txt") << "stopped";
+        }
+        QTest::qWait(800);
+        QVERIFY(found("stopped").empty());
+        last = {};
+        QVERIFY(watcher.start({db, root}));
+        QTRY_COMPARE_WITH_TIMEOUT(found("stopped").size(), std::size_t{1}, 10000);
+        watcher.cancel();
+        QTRY_VERIFY(!watcher.isBusy());
+    }
+
+    void watchOverflowRestartAndSilentGapReconcile() {
+        using fileweaver::desktop::DirectoryChange;
+        auto api = fileweaver::desktop::windowsWatchApi();
+        std::atomic<int> attached = 0, polls = 0, scans = 0;
+        std::atomic<std::int64_t> milliseconds = 0;
+        api.now = [&] {
+            return fileweaver::WatchSchedule::Time(std::chrono::milliseconds(milliseconds.load()));
+        };
+        api.utc = [] { return std::int64_t{1700000000000000000}; };
+        api.idle = [&](const auto &) { milliseconds += 5000; };
+        api.source = [&](const auto &) {
+            ++attached;
+            return std::make_unique<ScriptedChanges>([&](const auto &stop) {
+                const auto call = ++polls;
+                if (call == 1) {
+                    return DirectoryChange::overflow;
+                }
+                if (call == 2) {
+                    throw std::runtime_error("synthetic disconnection");
+                }
+                if (call == 3) {
+                    milliseconds += 60000;
+                    return DirectoryChange::timeout;
+                }
+                return waitForStop(stop);
+            });
+        };
+        api.sync = [&](const auto &, const auto &, const auto &) {
+            const auto attempt = ++scans;
+            fileweaver::RefreshRootResult result;
+            result.exit_code = 0;
+            result.index.emplace();
+            if (attempt == 3) {
+                result.exit_code = 1;
+                result.index->scan.complete = false;
+                result.index->scan.errors = 1;
+                result.error = "synthetic incomplete scan";
+            }
+            return result;
+        };
+        fileweaver::desktop::WatchController watcher(api);
+        fileweaver::RootInfo root;
+        root.root_id = 1;
+        root.policy_known = true;
+        root.path = "C:\\synthetic";
+        QVERIFY(watcher.start({std::filesystem::path(L"C:\\synthetic.sqlite"), root}));
+        QTRY_COMPARE(scans.load(), 5); // startup, overflow, reconnect, periodic silent gap
+        QCOMPARE(attached.load(), 3);
+        bool heartbeat = false;
+        QTimer::singleShot(0, &watcher, [&] { heartbeat = true; });
+        QTRY_VERIFY(heartbeat);
+        watcher.cancel();
+        QTRY_VERIFY(!watcher.isBusy());
+    }
+
+    void watchCancelsAndJoinsDuringReconciliation() {
+        auto api = fileweaver::desktop::windowsWatchApi();
+        std::atomic<bool> entered = false, exited = false;
+        api.source = [](const auto &) { return std::make_unique<ScriptedChanges>(waitForStop); };
+        api.sync = [&](const auto &, const auto &, const auto &stop) {
+            entered = true;
+            static_cast<void>(waitForStop(stop));
+            exited = true;
+            return fileweaver::RefreshRootResult{};
+        };
+        fileweaver::RootInfo root;
+        root.root_id = 1;
+        root.path = "C:\\synthetic";
+        root.policy_known = true;
+        auto watcher = std::make_unique<fileweaver::desktop::WatchController>(api);
+        auto unknown = root;
+        unknown.policy_known = false;
+        QVERIFY(!watcher->start({std::filesystem::path(L"C:\\synthetic.sqlite"), unknown}));
+        QVERIFY(watcher->start({std::filesystem::path(L"C:\\synthetic.sqlite"), root}));
+        QTRY_VERIFY(entered.load());
+        watcher->cancel();
+        QTRY_VERIFY(!watcher->isBusy());
+        QVERIFY(exited.load());
+        entered = false;
+        exited = false;
+        QVERIFY(watcher->start({std::filesystem::path(L"C:\\synthetic.sqlite"), root}));
+        QTRY_VERIFY(entered.load());
+        watcher.reset();
+        QVERIFY(exited.load());
+    }
+
+    void watchWindowIsOptInAndDatabaseChangesCancel() {
+        auto api = fileweaver::desktop::windowsWatchApi();
+        std::atomic<int> listed = 0, attached = 0, scans = 0;
+        api.roots = [&](const auto &, const auto &) {
+            ++listed;
+            fileweaver::RootInfo root;
+            root.root_id = 1;
+            root.path = "C:\\synthetic";
+            root.policy_known = true;
+            return std::vector<fileweaver::RootInfo>{root};
+        };
+        api.source = [&](const auto &) {
+            ++attached;
+            return std::make_unique<ScriptedChanges>(waitForStop);
+        };
+        api.sync = [&](const auto &, const auto &, const auto &) {
+            ++scans;
+            fileweaver::RefreshRootResult result;
+            result.exit_code = 0;
+            result.index.emplace();
+            return result;
+        };
+        SearchWindow window(
+            [](const auto &, const auto &) { return std::vector<fileweaver::SearchResult>{}; },
+            nullptr, fileweaver::desktop::windowsHotkeyApi(), fileweaver::desktop::openSelectedFile,
+            fileweaver::desktop::revealSelectedFile, api);
+        window.show();
+        auto *load = control<QPushButton>(window, "watchLoad");
+        auto *start = control<QPushButton>(window, "watchStart");
+        QVERIFY(!load->isEnabled());
+        QVERIFY(!start->isEnabled());
+        window.setDatabase(QStringLiteral("C:/synthetic/index.sqlite"));
+        QTRY_VERIFY(load->isEnabled());
+        QCOMPARE(listed.load(), 0);
+        QCOMPARE(attached.load(), 0);
+        QCOMPARE(scans.load(), 0);
+        QTest::mouseClick(load, Qt::LeftButton);
+        QTRY_VERIFY(start->isEnabled());
+        QCOMPARE(listed.load(), 1);
+        QCOMPARE(attached.load(), 0);
+        QTest::mouseClick(start, Qt::LeftButton);
+        QTRY_COMPARE(scans.load(), 1);
+        QVERIFY(!load->isEnabled());
+        QVERIFY(!start->isEnabled());
+        window.setDatabase(QStringLiteral("C:/synthetic/other.sqlite"));
+        QTRY_VERIFY(load->isEnabled());
+        QVERIFY(!start->isEnabled());
+        QCOMPARE(control<QComboBox>(window, "watchRoot")->count(), 0);
+        QCOMPARE(attached.load(), 1);
+    }
+
     void fuzzyModeAndSettingsUseSharedRequest() {
         std::mutex mutex;
         fileweaver::SearchRequest last;

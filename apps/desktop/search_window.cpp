@@ -4,6 +4,7 @@
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QDateTime>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -24,6 +25,7 @@
 #include <QSpinBox>
 #include <QStandardItemModel>
 #include <QStyle>
+#include <QTimeZone>
 #include <QTreeView>
 #include <QVBoxLayout>
 #include <algorithm>
@@ -53,9 +55,11 @@ QString parentText(const QString &path) {
 } // namespace
 
 SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, HotkeyApi hotkey_api,
-                           FileOpenController::Open open_file, FileOpenController::Open reveal_file)
+                           FileOpenController::Open open_file, FileOpenController::Open reveal_file,
+                           WatchApi watch_api)
     : QWidget(parent), hotkey_(std::move(hotkey_api)), controller_(std::move(search)),
-      opener_(std::move(open_file), nullptr, std::move(reveal_file)) {
+      opener_(std::move(open_file), nullptr, std::move(reveal_file)),
+      watcher_(std::move(watch_api)) {
     setWindowTitle(QStringLiteral("FileWeaver — 檔名搜尋"));
     setWindowIcon(style()->standardIcon(QStyle::SP_FileDialogContentsView));
     resize(1000, 650);
@@ -125,6 +129,56 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     layout->addWidget(hotkey_status_);
     connect(hotkey_enabled_, &QCheckBox::toggled, this, &SearchWindow::updateHotkey);
     connect(&hotkey_, &GlobalHotkey::activated, this, &SearchWindow::activateSearch);
+    auto watch_row = std::make_unique<QHBoxLayout>();
+    watch_load_ = new QPushButton(QStringLiteral("載入監控根目錄"), this);
+    watch_load_->setObjectName(QStringLiteral("watchLoad"));
+    watch_load_->setEnabled(false);
+    watch_root_ = new QComboBox(this);
+    watch_root_->setObjectName(QStringLiteral("watchRoot"));
+    watch_root_->setAccessibleName(QStringLiteral("監控根目錄"));
+    watch_root_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    watch_root_->setMinimumContentsLength(20);
+    watch_start_ = new QPushButton(QStringLiteral("啟用監控"), this);
+    watch_start_->setObjectName(QStringLiteral("watchStart"));
+    watch_stop_ = new QPushButton(QStringLiteral("停止監控"), this);
+    watch_stop_->setObjectName(QStringLiteral("watchStop"));
+    watch_row->addWidget(watch_load_);
+    watch_row->addWidget(watch_root_, 1);
+    watch_row->addWidget(watch_start_);
+    watch_row->addWidget(watch_stop_);
+    layout->addLayout(watch_row.release());
+    watch_status_ = new QLabel(QStringLiteral("監控未啟用；只有手動啟用後才會背景重掃。"), this);
+    watch_status_->setObjectName(QStringLiteral("watchStatus"));
+    watch_status_->setTextFormat(Qt::PlainText);
+    watch_status_->setWordWrap(true);
+    layout->addWidget(watch_status_);
+    connect(watch_load_, &QPushButton::clicked, this, [this] {
+        if (watcher_.load(std::filesystem::path(database_.toStdWString()))) {
+            watch_status_->setText(QStringLiteral("正在讀取已登錄根目錄…"));
+            updateWatchControls();
+        }
+    });
+    connect(watch_root_, &QComboBox::currentIndexChanged, this, [this] { updateWatchControls(); });
+    connect(watch_start_, &QPushButton::clicked, this, [this] {
+        const auto index = watch_root_->currentIndex();
+        if (index < 0 || static_cast<std::size_t>(index) >= watch_roots_.size()) {
+            return;
+        }
+        if (watcher_.start({std::filesystem::path(database_.toStdWString()),
+                            watch_roots_[static_cast<std::size_t>(index)]})) {
+            watch_scans_ = 0;
+            watch_last_sync_.reset();
+            watch_status_->setText(QStringLiteral("正在啟用監控；將先核對選定根目錄。"));
+            updateWatchControls();
+        }
+    });
+    connect(watch_stop_, &QPushButton::clicked, this, [this] {
+        watcher_.cancel();
+        watch_status_->setText(QStringLiteral("已要求停止，正在取消背景工作…"));
+        updateWatchControls();
+    });
+    connect(&watcher_, &WatchController::updated, this, &SearchWindow::showWatchReply);
+    updateWatchControls();
     status_ = new QLabel(QStringLiteral("選擇現有索引後，即可開始搜尋。"), this);
     status_->setObjectName(QStringLiteral("status"));
     status_->setTextFormat(Qt::PlainText);
@@ -235,10 +289,59 @@ void SearchWindow::activateSearch() {
 }
 
 void SearchWindow::setDatabase(const QString &path) {
+    watcher_.cancel();
+    watch_roots_.clear();
+    watch_root_->clear();
+    watch_scans_ = 0;
+    watch_last_sync_.reset();
+    watch_status_->setText(QStringLiteral("索引已切換；監控預設關閉。"));
     database_ = path;
+    updateWatchControls();
     database_path_->setText(QDir::toNativeSeparators(path));
     schedule();
     query_->setFocus();
+}
+
+void SearchWindow::updateWatchControls() {
+    const auto busy = watcher_.isBusy();
+    watch_load_->setEnabled(!database_.isEmpty() && !busy);
+    watch_root_->setEnabled(!busy && !watch_roots_.empty());
+    const auto index = watch_root_->currentIndex();
+    const bool known = index >= 0 && static_cast<std::size_t>(index) < watch_roots_.size() &&
+                       watch_roots_[static_cast<std::size_t>(index)].policy_known;
+    watch_start_->setEnabled(!busy && known);
+    watch_stop_->setEnabled(busy);
+}
+void SearchWindow::showWatchReply(const WatchReply &reply) {
+    if (reply.kind == WatchReplyKind::roots) {
+        watch_roots_ = reply.roots;
+        watch_last_sync_.reset();
+        watch_root_->clear();
+        for (const auto &root : watch_roots_) {
+            const auto path =
+                QString::fromUtf8(root.path.data(), static_cast<qsizetype>(root.path.size()));
+            watch_root_->addItem(path + (root.policy_known
+                                             ? QString{}
+                                             : QStringLiteral("（需先重新索引保存設定）")));
+            watch_root_->setItemData(watch_root_->count() - 1, path, Qt::ToolTipRole);
+        }
+    }
+    auto message = reply.message;
+    if (reply.last_sync) {
+        watch_last_sync_ = reply.last_sync;
+    }
+    if (watch_last_sync_) {
+        message += QStringLiteral(" 最後成功同步：") +
+                   QDateTime::fromMSecsSinceEpoch(*watch_last_sync_ / 1000000)
+                       .toUTC()
+                       .toString(Qt::ISODate);
+    }
+    watch_status_->setText(message);
+    updateWatchControls();
+    if (reply.scans > watch_scans_) {
+        watch_scans_ = reply.scans;
+        searchNow();
+    }
 }
 
 void SearchWindow::clearResults() {
@@ -471,6 +574,7 @@ void SearchWindow::closeEvent(QCloseEvent *event) {
     debounce_.stop();
     controller_.cancel();
     opener_.cancel();
+    watcher_.cancel();
     if (!confirmation_.isNull()) {
         confirmation_->reject();
     }

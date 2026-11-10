@@ -24,4 +24,13 @@ struct RefreshSummary {
 [[nodiscard]] RefreshSummary refresh_index(const std::filesystem::path &database,
                                            const std::function<std::int64_t()> &clock,
                                            const std::stop_token &stop = {});
+struct RootRefreshRequest {
+    std::filesystem::path database;
+    std::int64_t root_id = 0;
+    std::filesystem::path expected_root;
+};
+// Refresh exactly the selected registration; reject changed identity/path before scanning.
+[[nodiscard]] RefreshRootResult refresh_root(const RootRefreshRequest &request,
+                                             const std::function<std::int64_t()> &clock,
+                                             const std::stop_token &stop = {});
 } // namespace fileweaver

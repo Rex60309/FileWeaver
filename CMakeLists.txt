@@ -90,12 +90,12 @@ if(FILEWEAVER_BUILD_DESKTOP)
   endif()
   find_package(Qt6 6.3 REQUIRED COMPONENTS Widgets Test)
   find_package(Threads REQUIRED)
-  set(DESKTOP_SOURCES apps/desktop/file_open.cpp apps/desktop/file_open.hpp apps/desktop/global_hotkey.cpp apps/desktop/global_hotkey.hpp apps/desktop/main.cpp apps/desktop/arguments.cpp apps/desktop/arguments.hpp apps/desktop/search_controller.cpp
+  set(DESKTOP_SOURCES apps/desktop/directory_changes.cpp apps/desktop/directory_changes.hpp apps/desktop/watch_controller.cpp apps/desktop/watch_controller.hpp apps/desktop/file_open.cpp apps/desktop/file_open.hpp apps/desktop/global_hotkey.cpp apps/desktop/global_hotkey.hpp apps/desktop/main.cpp apps/desktop/arguments.cpp apps/desktop/arguments.hpp apps/desktop/search_controller.cpp
     apps/desktop/search_controller.hpp apps/desktop/search_window.cpp
     apps/desktop/search_window.hpp tests/desktop/search_window_test.cpp)
-  set(DESKTOP_TIDY_SOURCES apps/desktop/file_open.cpp apps/desktop/global_hotkey.cpp apps/desktop/main.cpp apps/desktop/arguments.cpp apps/desktop/search_controller.cpp
+  set(DESKTOP_TIDY_SOURCES apps/desktop/directory_changes.cpp apps/desktop/watch_controller.cpp apps/desktop/file_open.cpp apps/desktop/global_hotkey.cpp apps/desktop/main.cpp apps/desktop/arguments.cpp apps/desktop/search_controller.cpp
     apps/desktop/search_window.cpp tests/desktop/search_window_test.cpp)
-  add_library(fileweaver_desktop_ui apps/desktop/file_open.cpp apps/desktop/file_open.hpp apps/desktop/global_hotkey.cpp apps/desktop/global_hotkey.hpp apps/desktop/arguments.cpp apps/desktop/arguments.hpp apps/desktop/search_controller.cpp
+  add_library(fileweaver_desktop_ui apps/desktop/directory_changes.cpp apps/desktop/directory_changes.hpp apps/desktop/watch_controller.cpp apps/desktop/watch_controller.hpp apps/desktop/file_open.cpp apps/desktop/file_open.hpp apps/desktop/global_hotkey.cpp apps/desktop/global_hotkey.hpp apps/desktop/arguments.cpp apps/desktop/arguments.hpp apps/desktop/search_controller.cpp
     apps/desktop/search_controller.hpp apps/desktop/search_window.cpp apps/desktop/search_window.hpp)
   set_target_properties(fileweaver_desktop_ui PROPERTIES AUTOMOC ON)
   target_include_directories(fileweaver_desktop_ui PUBLIC apps/desktop)
@@ -149,7 +149,7 @@ if(FILEWEAVER_BUILD_DESKTOP)
 endif()
 
 set(PROJECT_SOURCES tests/support/directory_link.hpp apps/cli/main.cpp apps/cli/output.hpp apps/cli/windows_io.hpp benchmarks/search/core_search.cpp benchmarks/search/process_memory.hpp src/database/initialize.cpp tests/integration/storage.cpp
-  src/core/utc_time.cpp include/fileweaver/core/utc_time.hpp src/core/fuzzy.cpp include/fileweaver/core/fuzzy.hpp
+  src/core/utc_time.cpp include/fileweaver/core/utc_time.hpp src/core/fuzzy.cpp include/fileweaver/core/fuzzy.hpp include/fileweaver/core/watch_schedule.hpp
   include/fileweaver/application/index.hpp
   include/fileweaver/application/inspect.hpp
   include/fileweaver/application/refresh.hpp

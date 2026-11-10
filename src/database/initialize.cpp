@@ -662,9 +662,12 @@ IndexSummary index_directory(const IndexRequest &request,
     }
     return summary;
 }
-RefreshSummary refresh_index(const std::filesystem::path &database,
-                             const std::function<std::int64_t()> &clock,
-                             const std::stop_token &stop) {
+namespace {
+RefreshSummary refresh_selected(const std::filesystem::path &database,
+                                std::optional<std::int64_t> selected,
+                                const std::optional<std::filesystem::path> &expected,
+                                const std::function<std::int64_t()> &clock,
+                                const std::stop_token &stop) {
     if (!clock) {
         throw std::invalid_argument("A refresh clock is required");
     }
@@ -704,7 +707,13 @@ RefreshSummary refresh_index(const std::filesystem::path &database,
         auto roots =
             prepare(db.get(), "SELECT roots.id,normalized_path,maximum_depth FROM roots "
                               "LEFT JOIN root_scan_options ON roots.id=root_scan_options.root_id "
+                              "WHERE (?1 IS NULL OR roots.id=?1) "
                               "ORDER BY normalized_path COLLATE BINARY,roots.id LIMIT 10001");
+        if (selected) {
+            bind_integer(roots.get(), 1, *selected);
+        } else if (sqlite3_bind_null(roots.get(), 1) != SQLITE_OK) {
+            throw StorageError("Cannot bind selected root", 1);
+        }
         std::size_t text_bytes = 0;
         std::size_t path_count = 0;
         const auto read_path = [&](sqlite3_stmt *row, int column) {
@@ -768,6 +777,9 @@ RefreshSummary refresh_index(const std::filesystem::path &database,
         }
         execute(db.get(), "COMMIT");
     }
+    if (expected && (plans.empty() || plans.front().result.root != *expected)) {
+        throw StorageError("Selected root registration/path changed; reload the root list", 5);
+    }
     RefreshSummary summary;
     summary.cancelled = stop.stop_requested();
     summary.roots.reserve(plans.size());
@@ -803,6 +815,23 @@ RefreshSummary refresh_index(const std::filesystem::path &database,
         !summary.cancelled && std::all_of(summary.roots.begin(), summary.roots.end(),
                                           [](const auto &result) { return result.exit_code == 0; });
     return summary;
+}
+
+} // namespace
+RefreshSummary refresh_index(const std::filesystem::path &database,
+                             const std::function<std::int64_t()> &clock,
+                             const std::stop_token &stop) {
+    return refresh_selected(database, std::nullopt, std::nullopt, clock, stop);
+}
+RefreshRootResult refresh_root(const RootRefreshRequest &request,
+                               const std::function<std::int64_t()> &clock,
+                               const std::stop_token &stop) {
+    if (request.root_id <= 0 || request.expected_root.empty()) {
+        throw StorageError("A positive registered root ID and exact root path are required", 2);
+    }
+    auto summary =
+        refresh_selected(request.database, request.root_id, request.expected_root, clock, stop);
+    return std::move(summary.roots.front());
 }
 
 std::vector<RootInfo> list_roots(const std::filesystem::path &database,
