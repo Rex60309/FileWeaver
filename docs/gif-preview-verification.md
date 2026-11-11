@@ -112,3 +112,34 @@ presets/dependencyOptions above use build/gif-final-debug and build/gif-final-re
 Both final full CTest runs passed **15/15**. Core Debug/Release remained **13/13**.
 The usual desktop application targets rebuilt successfully after this cleanup.
 Final desktop format and static analysis passed after this cleanup.
+
+## Hosted verification checkpoint
+
+Source revision `a331beabab52b83fdb8944e5bf5d07e1801d5dd9` was pushed to
+`feat/windows-gif-preview`. [Quality run 43062161091](https://github.com/Rex60309/FileWeaver/actions/runs/43062161091)
+has passed Windows core Debug/Release (130667334632), Ubuntu core
+(130667334187), and analysis/ASan/UBSan (130667334744). Windows desktop
+(130667334673) is still preparing Qt dependencies at this checkpoint. Final
+acceptance remains pending until its MSVC Debug/Release builds and tests finish.
+
+## Hosted MSVC warning and correction
+
+Run 43062161091 passed its three core/analysis jobs, but desktop compilation
+stopped before tests: MSVC C4334 (32-bit shift result widened to 64 bits) was an
+error under /WX at the GIF color-table calculation. The shift and multiplication
+now use unsigned size_t explicitly, then convert the bounded result (6..768 bytes)
+to qsizetype. No warning setting or resource limit changes. Rebuild/retest and
+hosted verification of the correction are required; the failed run is not accepted.
+
+Correction local evidence: preset-based fresh build/gif-msvc-fix-debug and
+build/gif-msvc-fix-release builds passed. Exact full test commands:
+
+```powershell
+ctest --test-dir build/gif-msvc-fix-debug --output-on-failure
+ctest --test-dir build/gif-msvc-fix-release --output-on-failure
+```
+
+Both passed **15/15** after the MSVC shift-type correction, with TEMP/TMP explicitly
+set to build/test-temp. Primary desktop application targets also rebuilt. The
+helper arithmetic change does not affect core source or the prior core 13/13
+results. Final format/lint passed before the correction commit.

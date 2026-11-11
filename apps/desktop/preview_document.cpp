@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <QStringConverter>
 #include <algorithm>
+#include <cstddef>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -105,7 +106,8 @@ void validateGifFirstFrame(const QByteArray &bytes) {
     const auto packed = static_cast<unsigned char>(bytes[10]);
     qsizetype position = 13;
     if ((packed & 0x80U) != 0) {
-        position += qsizetype{3} * (1U << ((packed & 7U) + 1U));
+        position +=
+            static_cast<qsizetype>(std::size_t{3} * (std::size_t{1} << ((packed & 7U) + 1U)));
     }
     if (position > bytes.size()) {
         throw std::runtime_error("Incomplete GIF color table");
