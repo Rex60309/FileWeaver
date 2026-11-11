@@ -111,3 +111,26 @@ cmake --build --preset desktop-debug --target fileweaver-desktop --parallel 4
 cmake --preset desktop-release
 cmake --build --preset desktop-release --target fileweaver-desktop --parallel 4
 ```
+
+
+## Hosted verification: pending external scheduling
+
+Source revision `f54dec8d40361d3f1ffd0d0a6de943cfcbc72c0b` was pushed to
+`feat/windows-pdf-preview` and triggered
+[quality run 43096237771](https://github.com/Rex60309/FileWeaver/actions/runs/43096237771).
+At 2026-11-11 20:42 UTC (2026-11-12 Asia/Taipei), the run remained queued,
+with zero jobs allocated since creation at 20:28:12 UTC. Repeated API checks
+confirmed no running jobs elsewhere in this repository; GitHub's official status
+reported Actions operational. The cause of the scheduling delay is unknown.
+No job failure, hosted test pass or PDF sanitizer coverage can be inferred.
+
+Local gates passed, but full milestone acceptance remains pending the actual
+MSVC Debug/Release and existing portable-core CI jobs. If a job fails, inspect
+its log, correct the cause and rerun applicable gates. This documentation-only
+follow-up does not alter the source/tests/dependency configuration being checked;
+its skip-ci marker avoids a redundant queued run, not a failed test.
+
+The local integration patches also had blank context-line trailing spaces
+removed for git diff --check. Both still passed git apply --check against the
+same extracted official archive; their applied source changes are identical.
+No generated binaries, source PDFs, databases or download caches were committed.
