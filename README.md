@@ -2,7 +2,7 @@
 
 以 C++20 開發的本機檔案搜尋與生產力工具。**Phase 1 — Search Core 已完成實作與驗收**，
 範圍依 SPEC 第 24 節；尚無正式發行版本。Phase 2 已加入可選的 Windows Qt 搜尋視窗，
-支援選擇既有索引、背景搜尋、鍵盤選取與手動複製完整路徑。多根目錄監控仍為規劃項目。Windows Phase 2 新增功能正在進行完整驗收。
+支援選擇既有索引、背景搜尋、鍵盤選取與手動複製完整路徑。多根目錄監控仍為規劃項目。**Windows Phase 2 的授權首批範圍已完成實作與驗收**；包含 glob／路徑搜尋、視覺篩選／排序、文字與 PNG／JPEG 預覽、可選偏好設定。詳見 [Phase 2 驗收紀錄](docs/phase2-acceptance.md)。
 已加入手動啟用的 Windows 單根目錄監控與背景索引同步。
 已加入有界候選的模糊檔名搜尋與可調整的相關度排序。
 已加入可手動啟用的 Windows 全域快捷鍵；預設組合為 `Ctrl+Alt+Space`，每次啟動預設關閉。
@@ -47,7 +47,7 @@
 多根目錄監控、CLI 監控／預覽、PDF／GIF 預覽、重複檔案分析、整理與重新命名、剪貼簿歷史、專案啟動器、
 語意搜尋、備份與還原。這些是規劃項目，不能透過目前版本使用。
 
-## Windows Phase 2 新功能（驗收中）
+## Windows Phase 2 新功能
 
 - 「篩選／排序」可組合副檔名（可明確指定無副檔名）、位元組大小、已登錄根目錄、UTC 修改時間，以及名稱／大小／修改時間／模糊相關度排序。
 - `glob` 只比對檔名，區分大小寫，支援 `*`、`?`、`[abc]`、`[a-z]`、`[!abc]`；反斜線是普通字元，使用 `[[]` 表示 `[`。模式最多 256 個 Unicode 字元。
@@ -55,15 +55,15 @@
 
 ```powershell
 .\build\release\fileweaver.exe search "*.mp4" --mode glob --database ".\build\my-index\index.sqlite"
-.\build\release\fileweaver.exe search "ASMR/みやぢ" --mode path --database ".\build\my-index\index.sqlite"
-.\build\release\fileweaver.exe search "みやぢ audio" --mode fuzzy --fuzzy-path --fuzzy-path-weight 50 --database ".\build\my-index\index.sqlite"
+.\build\release\fileweaver.exe search "素材/日本語" --mode path --database ".\build\my-index\index.sqlite"
+.\build\release\fileweaver.exe search "日本語 audio" --mode fuzzy --fuzzy-path --fuzzy-path-weight 50 --database ".\build\my-index\index.sqlite"
 ```
 
 選取結果後勾選「啟用內容預覽」才會讀取內容。支援文字、Markdown、JSON、XML、CSV、常見原始碼，以及 PNG／JPEG；原始碼與標記只以純文字及語法色彩顯示，不執行腳本、HTML 或外部資源。文字只讀前 64 KiB，最多 2000 行，支援 UTF-8／含 BOM 的 UTF-16；截斷會提示。圖片限 8 MiB、16,777,216 像素、單邊 8192，縮圖最多 256×256。
 
 解析在獨立 helper 程序執行，限制 192 MiB 私有記憶體、2 秒使用者 CPU、5 秒總等待時間及 512 KiB 回傳資料；可取消，失敗不改由視窗直接解析。這是程序與資源隔離，並非完整權限沙箱。最多保留 8 張記憶體縮圖，使用 SHA-256 重新驗證來源；不寫入磁碟。關閉預覽、切換索引、隱藏／最小化或結束時清除內容與快取，隱藏／最小化後需重新勾選。
 
-「記住偏好設定」可選擇保存字型大小、搜尋模式／排序／上限、模糊權重及快捷鍵組合，存於 Windows 本機應用程式資料目錄的 `FileWeaver/preferences.json`（實際位置由 Qt 標準路徑決定）。不保存查詢、索引／來源路徑、內容或縮圖。取消勾選只保留停用標記。**預覽、監控及快捷鍵啟用狀態每次啟動均關閉**，不因保存偏好而自動啟用。
+「記住偏好設定」可選擇保存字型大小、搜尋模式／排序／上限、模糊權重及快捷鍵組合，存於 Qt `AppLocalDataLocation` 指定的 Windows 本機應用程式資料目錄下的 `preferences.json`。不保存查詢、索引／來源路徑、內容或縮圖。取消勾選只保留停用標記。**預覽、監控及快捷鍵啟用狀態每次啟動均關閉**，不因保存偏好而自動啟用。
 
 ## Windows 搜尋視窗怎麼使用？
 
@@ -231,11 +231,11 @@ ctest --preset desktop-release --output-on-failure
 ```
 
 這兩個 preset 開啟 `FILEWEAVER_BUILD_DESKTOP` 與 vcpkg 的 `desktop` feature，
-首次會下載並編譯 Qt 6 Widgets／Test 及其依賴；預設 CLI preset 不需要 Qt。
+首次會下載並編譯 Qt 6 Widgets／Test、PNG／JPEG 支援及其依賴；預設 CLI preset 不需要 Qt。
 若 PCRE2 依賴下載因 GitHub API 的 JSON 排版變動而發生 SHA512 不符，可先執行
 `python tools/prepare_qt_download.py` 再重新設定；此步驟仍要求符合固定版本的原始雜湊，不會略過驗證。
 MinGW 的編譯器、資源編譯器與依賴必須使用相同架構；不要混用 32 位元 windres 與 64 位元 GCC。
-執行時需保留建置目錄中的相依 DLL、`platforms` 與 `styles` 子目錄，不要只複製 EXE。
+執行時需保留建置目錄中的相依 DLL、`platforms`、`styles`、`imageformats` 子目錄，以及 `fileweaver-preview-worker.exe`，不要只複製主程式 EXE。預覽 helper 缺失或無法套用資源限制時，會顯示失敗，不改用視窗內解析。
 目前以 Windows 功能開發與驗證為主，不安排發行包。
 已通過本機 Windows GCC 與遠端 Windows/MSVC 的 Debug／Release 測試及本機視窗操作驗證。
 驗證指令、CI 紀錄與限制見 [Windows 視窗驗證紀錄](docs/desktop-search-verification.md)。

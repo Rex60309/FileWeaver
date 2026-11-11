@@ -1,18 +1,18 @@
 # Windows Phase 2 completion ledger
 
-Date: 2026-11-11 (Asia/Taipei). User explicitly authorized completing Phase 2 and
+Implementation: 2026-11-11; acceptance recorded: 2026-11-12 (Asia/Taipei). User explicitly authorized completing Phase 2 and
 confirmed the scope below. PRODUCT_SPEC sections 4-6, 20, 23 and Phase 2 deliverables
 apply. Windows remains primary; no release package or Phase 3-5 functionality.
 
 | Requirement | Current evidence / remaining implementation |
 | --- | --- |
 | Qt GUI, bounded async search, stale-result cancellation/navigation | Existing tested baseline |
-| Global hotkey, collision/configuration/focus | Existing baseline; add Escape hide while enabled, X quits |
-| Fuzzy matching/configurable deterministic ranking | Existing baseline; add path-component matching |
-| Glob and literal path modes | Implemented core + CLI + GUI; local generated E2E passed, hosted pending |
-| Visual filters/sort matching CLI | Implemented; local GUI request mapping passed, hosted pending |
+| Global hotkey, collision/configuration/focus | Tested Escape hide while enabled, X quits; hotkey collision/configuration retained |
+| Fuzzy matching/configurable deterministic ranking | Tested filename and parent-component matching with configurable ranking |
+| Glob and literal path modes | Implemented core + CLI + GUI; local and hosted generated E2E passed |
+| Visual filters/sort matching CLI | Implemented; local and hosted GUI request mapping passed |
 | Real-time watching/reconciliation | Single opt-in root baseline, successful hosted run 42774849289 |
-| Safe first-batch previews | Implemented TXT/Markdown/JSON/XML/CSV/source code/PNG/JPEG, syntax highlighting and bounded thumbnail cache; generated helper/Qt tests passed, hosted pending |
+| Safe first-batch previews | Implemented TXT/Markdown/JSON/XML/CSV/source code/PNG/JPEG, syntax highlighting and bounded thumbnail cache; local and hosted generated helper/Qt tests passed |
 | Untrusted parser limits/cancellation | Isolated helper process, Windows job memory/CPU/wall limits, bounded IPC, no execution of document data |
 | Optional settings persistence | Non-sensitive weights/hotkey combination/font preferences only; preview/watch/hotkey activation never restored |
 | Verification/docs | Generated regression/E2E/Qt fixtures, required Windows gates, hosted CI, README/status updated per slice |
@@ -24,7 +24,7 @@ stay. PDF/GIF are the second preview batch in section 6.1 and are not part of th
 accepted completion scope. Directory/application/project result categories belong
 to later authorized capabilities; do not add executable/script launching or Phase 4
 projects. Multi-root/CLI watch, broader Missing reconciliation, content indexes and
-release packaging remain separate work. This ledger is not a completion claim.
+release packaging remain separate work. The accepted first-batch Windows scope is complete; the explicit exclusions above remain planned. Earlier checkpoint sections below preserve the verification history.
 
 ## Local verification in progress
 
@@ -161,3 +161,52 @@ in place of `build/phase2-clean-release`, whose previously tested executable als
 remained locked by a terminated Windows process record. No test was skipped or
 replaced with stale results. Hosted MSVC and portable-core sanitizer verification
 are pending for the committed source revision; Phase 2 is not yet declared accepted.
+
+## Hosted verification tracking
+
+Source revision: `4e257fdb4a0c32ffc2eb4b0b46aa6d60590ad760` on
+`feat/phase2-completion`. [Quality run 43017969654](https://github.com/Rex60309/FileWeaver/actions/runs/43017969654)
+was triggered by the pushed implementation. Windows core Debug/Release (job
+130513717794), Ubuntu core (130513718217), and format/lint/ASan/UBSan analysis
+(130513718408) passed. Windows desktop job 130513718079 is still preparing its
+pinned Qt dependencies at this checkpoint. No acceptance/completion claim is made
+until that job has compiled and tested both configurations.
+
+Benchmark condition clarification: desktop static analysis was running during the
+local fuzzy regression measurement. Background CPU load was not isolated; the
+recorded timings are an observed correctness baseline, not a controlled speedup
+comparison or an acceptance claim for the SPEC latency targets.
+
+## Final hosted acceptance — recorded 2026-11-12
+
+[Quality run 43017969654](https://github.com/Rex60309/FileWeaver/actions/runs/43017969654)
+completed **all four jobs successfully** for source revision
+`4e257fdb4a0c32ffc2eb4b0b46aa6d60590ad760`:
+
+| Job | Observed result |
+| --- | --- |
+| Windows core (130513717794) | Debug/Release build and complete CTest passed |
+| Windows desktop (130513718079) | MSVC Debug/Release build and CTest **15/15 each** |
+| Ubuntu core (130513718217) | Debug/Release build and complete CTest passed |
+| Analysis (130513718408) | Format, lint and Clang ASan/UBSan tests passed |
+
+The desktop log records 15/15 at 2026-11-11 13:34:46 UTC (Debug) and
+13:38:07 UTC (Release). Its fresh runner checkout verifies the committed source
+and pinned dependencies independently of the local executable-lock condition.
+No release package is produced. Windows Qt sanitizer coverage is not claimed;
+the sanitizer job covers the portable core on its supported compiler/platform.
+
+The authorized Windows Phase 2 first-batch acceptance criteria are satisfied.
+Source files remain read-only; preview reads require opt-in, preferences are
+optional, and hotkey/watch/preview activation always starts off. No database schema
+or runtime network behavior changed. Approved dependency downloads were build-time
+only. Resource isolation is not a full permissions sandbox; source replacement
+races and conservative Missing reconciliation retain the documented limitations.
+
+PDF/GIF and additional image formats, multi-root/CLI watch, Linux desktop and
+Phase 3–5 remain outside this accepted scope. The next smallest proposed milestone
+is second-batch PDF/GIF preview design, requiring separate scope/dependency approval.
+
+The final documentation-only acceptance commit uses `[skip ci]`: executable source,
+tests, dependency manifest and workflow remain identical to the verified revision.
+This avoids rebuilding Qt for documentation and does not bypass a failed check.

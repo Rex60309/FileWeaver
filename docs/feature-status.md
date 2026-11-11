@@ -7,7 +7,10 @@ Phase 1 (PRODUCT_SPEC section 24) implementation and acceptance completed on
 revision, executed CI, benchmark scope and remaining whole-product limitations.
 The selected Phase 2 Windows search window is tested locally and in hosted MSVC
 Debug/Release CI; [evidence](desktop-search-verification.md) records the verified
-revision. The rest of Phase 2 and later phases remain planned. This is not a formal release.
+revision. The authorized Windows Phase 2 first-batch scope passed local and hosted checks;
+[acceptance evidence](phase2-acceptance.md) identifies the verified revision.
+PDF/GIF second-batch previews, multi-root/CLI watch and later phases remain planned.
+This is not a formal release.
 The Windows global-hotkey slice also passed native interaction and hosted MSVC
 Debug/Release checks; see [its acceptance evidence](global-hotkey-verification.md).
 Confirmed supported-file opening passed Windows GCC/native observation and hosted
@@ -54,9 +57,9 @@ Further work is prioritized for Windows; release packaging is out of scope.
 | 2 | Confirmed Windows Explorer reveal of selected local files, all extensions | Tested |
 | 2 | Bounded fuzzy filename matching/ranking, configurable CLI and Windows UI | Tested |
 | 2 | Opt-in single-root Windows notifications and policy-preserving reconciliation | Tested |
-| 2 | Glob/literal path/fuzzy parent components and visual filters/sort | In Progress |
-| 2 | Opt-in isolated text/source/PNG/JPEG previews, bounded thumbnails | In Progress |
-| 2 | Escape hide with active hotkey and optional non-sensitive preferences | In Progress |
+| 2 | Glob/literal path/fuzzy parent components and visual filters/sort | Tested |
+| 2 | Opt-in isolated text/source/PNG/JPEG previews, bounded thumbnails | Tested |
+| 2 | Escape hide with active hotkey and optional non-sensitive preferences | Tested |
 | Future | Multi-root/CLI watch and PDF/GIF second preview batch | Planned |
 | 3 | Analysis, duplicates, organizer, rename, journal | Planned |
 | 4 | Project launcher, opt-in clipboard, activity | Planned |
