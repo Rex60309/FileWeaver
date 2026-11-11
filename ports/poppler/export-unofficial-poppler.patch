@@ -1,0 +1,60 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -637,7 +637,12 @@
+ add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+ endif()
+ add_library(poppler ${poppler_SRCS} ${LINKER_SCRIPT})
+-target_include_directories(poppler PUBLIC poppler ${CMAKE_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_BINARY_DIR}/poppler)
++target_include_directories(poppler PUBLIC
++  $<INSTALL_INTERFACE:include/poppler>
++  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/poppler>
++  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}>
++  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
++  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/poppler>)
+ if (OpenJPEG_FOUND)
+   # check if we can remove this when we depend on newer openjpeg versions, 2.5 seems fixed
+   # target openjp2 may lack interface include directories
+@@ -666,7 +671,9 @@
+     set_target_properties(poppler PROPERTIES SUFFIX "-${POPPLER_SOVERSION}${CMAKE_SHARED_LIBRARY_SUFFIX}")
+ endif()
+ target_link_libraries(poppler LINK_PRIVATE ${poppler_LIBS})
+-install(TARGETS poppler RUNTIME DESTINATION bin LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
++install(TARGETS poppler EXPORT unofficial-poppler-targets RUNTIME DESTINATION bin LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
++install(EXPORT unofficial-poppler-targets NAMESPACE unofficial::poppler:: DESTINATION share/unofficial-poppler)
++set_target_properties(poppler PROPERTIES EXPORT_NAME poppler-private)
+
+ if(ENABLE_UNSTABLE_API_ABI_HEADERS)
+   set(poppler_poppler_installed_headers
+--- a/cpp/CMakeLists.txt
++++ b/cpp/CMakeLists.txt
+@@ -24,6 +24,7 @@
+ )
+
+ add_library(poppler-cpp ${poppler_cpp_SRCS})
++target_include_directories(poppler-cpp PUBLIC $<INSTALL_INTERFACE:include/poppler/cpp>)
+ generate_export_header(poppler-cpp BASE_NAME poppler-cpp EXPORT_FILE_NAME "${CMAKE_CURRENT_BINARY_DIR}/poppler_cpp_export.h")
+ set_target_properties(poppler-cpp PROPERTIES VERSION 3.1.0 SOVERSION 3)
+ if(MINGW AND BUILD_SHARED_LIBS)
+@@ -31,7 +32,8 @@
+     set_target_properties(poppler-cpp PROPERTIES SUFFIX "-${POPPLER_CPP_SOVERSION}${CMAKE_SHARED_LIBRARY_SUFFIX}")
+ endif()
+ target_link_libraries(poppler-cpp poppler Iconv::Iconv)
+-install(TARGETS poppler-cpp RUNTIME DESTINATION bin LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
++install(TARGETS poppler-cpp EXPORT unofficial-poppler-cpp-targets RUNTIME DESTINATION bin LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
++install(EXPORT unofficial-poppler-cpp-targets NAMESPACE unofficial::poppler:: DESTINATION share/unofficial-poppler)
+
+ set(poppler_cpp_all_install_headers
+   poppler-destination.h
+@@ -50,11 +52,4 @@
+   ${CMAKE_CURRENT_BINARY_DIR}/poppler-version.h
+ )
+
+-target_sources(poppler-cpp
+-  PUBLIC
+-  FILE_SET HEADERS
+-  BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR};${CMAKE_CURRENT_BINARY_DIR}
+-  FILES
+-  ${poppler_cpp_all_install_headers}
+-)
+-install(TARGETS poppler-cpp FILE_SET HEADERS DESTINATION include/poppler/cpp)
++install(FILES ${poppler_cpp_all_install_headers} DESTINATION include/poppler/cpp)

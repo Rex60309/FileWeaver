@@ -126,6 +126,13 @@ PreviewReply parsePreview(const QByteArray &payload) {
             return reply;
         }
         reply.first_frame = first_frame.toBool();
+        const auto first_page = object.value(QStringLiteral("first_page"));
+        if ((!first_page.isUndefined() && !first_page.isBool()) ||
+            (reply.first_frame && first_page.toBool())) {
+            reply.message = QStringLiteral("縮圖頁面標記無效。");
+            return reply;
+        }
+        reply.first_page = first_page.toBool();
         reply.hash = object.value(QStringLiteral("hash")).toString();
         if (!hashValid(reply.hash)) {
             reply.message = QStringLiteral("縮圖驗證碼無效。");
@@ -162,7 +169,9 @@ PreviewReply parsePreview(const QByteArray &payload) {
         return reply;
     }
     reply.message =
-        reply.first_frame ? QStringLiteral("GIF 首張畫面預覽（不播放動畫）；唯讀且不執行文件指令。")
+        reply.first_page ? QStringLiteral("PDF 第一頁靜態預覽；不提供腳本、表單、附件或連結互動。")
+        : reply.first_frame
+            ? QStringLiteral("GIF 首張畫面預覽（不播放動畫）；唯讀且不執行文件指令。")
         : reply.truncated
             ? QStringLiteral("僅顯示檔案前 64 KiB／2000 行以內；不執行程式碼或文件指令。")
             : QStringLiteral("唯讀預覽；不執行程式碼或文件指令。");

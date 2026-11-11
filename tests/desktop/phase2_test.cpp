@@ -58,6 +58,47 @@ PreviewProcess process(const char *name = "fileweaver-preview-worker.exe") {
 std::vector<fileweaver::SearchResult> result() {
     return {{1, 1, "C:/synthetic/report.txt", "report.txt", 3}};
 }
+// Deterministic temporary PDF with a red first page and blue second page.
+QByteArray pdfFixture(const QByteArray &geometry = "0 0 200 200", bool active = false,
+                      bool encrypted = false) {
+    const QByteArray red("1 0 0 rg 0 0 200 200 re f\n");
+    const QByteArray blue("0 0 1 rg 0 0 200 200 re f\n");
+    const auto stream = [](const QByteArray &data) {
+        return QByteArray("<< /Length ") + QByteArray::number(data.size()) + ">>\nstream\n" + data +
+               "endstream";
+    };
+    const QList<QByteArray> objects{
+        QByteArray("<< /Type /Catalog /Pages 2 0 R ") +
+            (active ? "/OpenAction << /S /JavaScript /JS (throw 123;) >> " : "") + ">>",
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+        QByteArray("<< /Type /Page /Parent 2 0 R /MediaBox [") + geometry +
+            "] /Resources << >> /Contents 5 0 R >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Contents 6 0 R >>",
+        stream(red),
+        stream(blue),
+        QByteArray("<< /Filter /Standard /V 1 /R 2 /Length 40 /P -4 /O "
+                   "<0000000000000000000000000000000000000000000000000000000000000000> /U "
+                   "<0000000000000000000000000000000000000000000000000000000000000000> >>")};
+    QByteArray out("%PDF-1.4\n");
+    QList<qsizetype> offsets{0};
+    for (qsizetype i = 0; i < objects.size(); ++i) {
+        offsets.push_back(out.size());
+        out += QByteArray::number(i + 1) + " 0 obj\n" + objects[i] + "\nendobj\n";
+    }
+    const auto xref = out.size();
+    out += "xref\n0 " + QByteArray::number(objects.size() + 1) + "\n0000000000 65535 f \n";
+    for (qsizetype i = 1; i < offsets.size(); ++i) {
+        out += QByteArray::number(offsets[i]).rightJustified(10, '0') + " 00000 n \n";
+    }
+    out += "trailer\n<< /Size " + QByteArray::number(objects.size() + 1) + " /Root 1 0 R ";
+    if (encrypted) {
+        // Locked security dictionary fixture: intentionally no usable password.
+        out += "/Encrypt 7 0 R /ID "
+               "[<00112233445566778899aabbccddeeff><00112233445566778899aabbccddeeff>] ";
+    }
+    out += ">>\nstartxref\n" + QByteArray::number(xref) + "\n%%EOF\n";
+    return out;
+}
 } // namespace
 class Phase2Tests final : public QObject {
     Q_OBJECT
@@ -111,7 +152,7 @@ class Phase2Tests final : public QObject {
         reply = runPreview({script, {}}, {}, process());
         QVERIFY(reply.ok);
         QVERIFY(reply.text.contains(QStringLiteral("Remove-Item")));
-        const auto unsupported = native(temp.filePath(QStringLiteral("unsupported.pdf")));
+        const auto unsupported = native(temp.filePath(QStringLiteral("unsupported.rar")));
         write(unsupported, "%PDF synthetic");
         QVERIFY(!runPreview({unsupported, {}}, {}, process()).ok);
         QVERIFY(
@@ -265,6 +306,55 @@ class Phase2Tests final : public QObject {
         std::stop_source stopped;
         stopped.request_stop();
         QVERIFY(!runPreview({path, {}}, stopped.get_token(), process()).ok);
+    }
+    void pdfFirstPageLimitsCacheAndUntrustedActions() {
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+        const auto path = native(temp.filePath(QStringLiteral("首頁 日本語.pdf")));
+        const auto bytes = pdfFixture();
+        write(path, bytes);
+        auto reply = runPreview({path, {}}, {}, process());
+        QVERIFY2(reply.ok, qPrintable(reply.message));
+        QVERIFY(reply.first_page);
+        QVERIFY(!reply.first_frame);
+        QVERIFY(reply.message.contains(QStringLiteral("PDF 第一頁")));
+        QVERIFY(reply.image.width() <= 256 && reply.image.height() <= 256);
+        QCOMPARE(reply.image.pixelColor(128, 128), QColor(Qt::red));
+        const auto hash = reply.hash;
+        reply = runPreview({path, hash}, {}, process());
+        QVERIFY(reply.ok);
+        QVERIFY(reply.cached);
+        QVERIFY(reply.first_page);
+        QVERIFY(reply.message.contains(QStringLiteral("PDF 第一頁")));
+        QFile unchanged(path);
+        QVERIFY(unchanged.open(QIODevice::ReadOnly));
+        QCOMPARE(unchanged.readAll(), bytes);
+        unchanged.close();
+        write(path, pdfFixture("0 0 200 200", true));
+        reply = runPreview({path, hash}, {}, process());
+        QVERIFY2(reply.ok, qPrintable(reply.message));
+        QVERIFY(!reply.cached);
+        QVERIFY(reply.hash != hash);
+        QCOMPARE(reply.image.pixelColor(128, 128), QColor(Qt::red));
+        write(path, pdfFixture("0 0 200 200", false, true));
+        reply = runPreview({path, {}}, {}, process());
+        QVERIFY(!reply.ok);
+        QVERIFY2(reply.message.contains(QStringLiteral("Encrypted")), qPrintable(reply.message));
+        write(path, pdfFixture("0 0 1000000 1000000"));
+        QVERIFY(!runPreview({path, {}}, {}, process()).ok);
+        write(path, "%PDF-1.4\ncorrupt");
+        QVERIFY(!runPreview({path, {}}, {}, process()).ok);
+        write(path, {});
+        QVERIFY(!runPreview({path, {}}, {}, process()).ok);
+        write(path, QByteArray(8 * 1024 * 1024 + 1, 'x'));
+        QVERIFY(!runPreview({path, {}}, {}, process()).ok);
+        std::stop_source stopped;
+        stopped.request_stop();
+        QVERIFY(!runPreview({path, {}}, stopped.get_token(), process()).ok);
+        QVERIFY(!parsePreview("{\"ok\":true,\"kind\":\"cached\",\"first_page\":\"true\"}").ok);
+        QVERIFY(!parsePreview(
+                     "{\"ok\":true,\"kind\":\"cached\",\"first_page\":true,\"first_frame\":true}")
+                     .ok);
     }
     void previewProcessProtocolTimeoutAndCancellation() {
         const auto worker = process("preview_test_worker.exe");

@@ -20,6 +20,7 @@ struct PreviewReply {
     bool cached = false;
     bool truncated = false;
     bool first_frame = false;
+    bool first_page = false;
 };
 struct PreviewProcess {
     std::filesystem::path executable;

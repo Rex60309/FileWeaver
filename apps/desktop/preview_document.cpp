@@ -1,4 +1,5 @@
 #include "local_file.hpp"
+#include "pdf_preview.hpp"
 #include "preview.hpp"
 #include <QBuffer>
 #include <QCryptographicHash>
@@ -29,7 +30,7 @@ using Handle = std::unique_ptr<std::remove_pointer_t<HANDLE>, Close>;
     throw std::runtime_error("Preview file I/O failed (Windows error " +
                              std::to_string(GetLastError()) + ")");
 }
-QByteArray readFile(const QString &path, bool image, bool &truncated) {
+QByteArray readFile(const QString &path, bool whole_file, bool &truncated) {
     const auto syntax = fileLocationPolicyError(path);
     const auto inspected = syntax.isEmpty() ? inspectLocalFile(path, {}) : syntax;
     if (!inspected.isEmpty()) {
@@ -55,13 +56,13 @@ QByteArray readFile(const QString &path, bool image, bool &truncated) {
     if (!GetFileSizeEx(file.get(), &size) || size.QuadPart < 0) {
         ioError();
     }
-    constexpr qint64 image_limit = qint64{8} * 1024 * 1024;
+    constexpr qint64 document_limit = qint64{8} * 1024 * 1024;
     constexpr qint64 text_limit = qint64{64} * 1024;
-    if (image && size.QuadPart > image_limit) {
-        throw std::runtime_error("Image exceeds 8 MiB preview limit");
+    if (whole_file && size.QuadPart > document_limit) {
+        throw std::runtime_error("Document exceeds 8 MiB preview limit");
     }
-    const auto count =
-        static_cast<DWORD>(std::min<qint64>(size.QuadPart, image ? image_limit : text_limit));
+    const auto count = static_cast<DWORD>(
+        std::min<qint64>(size.QuadPart, whole_file ? document_limit : text_limit));
     QByteArray result(static_cast<qsizetype>(count), Qt::Uninitialized);
     DWORD offset = 0;
     while (offset < count) {
@@ -75,7 +76,7 @@ QByteArray readFile(const QString &path, bool image, bool &truncated) {
         offset += got;
     }
     result.resize(offset);
-    truncated = !image && size.QuadPart > text_limit;
+    truncated = !whole_file && size.QuadPart > text_limit;
     if (!GetFileInformationByHandle(file.get(), &after)) {
         ioError();
     }
@@ -211,6 +212,7 @@ QByteArray previewDocument(const PreviewRequest &request) {
         const auto extension = QFileInfo(path).suffix().toLower();
         const bool image = extension == u"png" || extension == u"jpg" || extension == u"jpeg" ||
                            extension == u"gif";
+        const bool pdf = extension == u"pdf";
         const QStringList text_types{
             QStringLiteral("txt"),  QStringLiteral("md"),  QStringLiteral("markdown"),
             QStringLiteral("json"), QStringLiteral("xml"), QStringLiteral("csv"),
@@ -222,14 +224,14 @@ QByteArray previewDocument(const PreviewRequest &request) {
             QStringLiteral("go"),   QStringLiteral("rb"),  QStringLiteral("sh"),
             QStringLiteral("ps1"),  QStringLiteral("bat"), QStringLiteral("cmd"),
             QStringLiteral("cmake")};
-        if (!image && !text_types.contains(extension)) {
+        if (!image && !pdf && !text_types.contains(extension)) {
             throw std::runtime_error(
                 "Unsupported preview type; use confirmed opening when supported or copy the path");
         }
         bool truncated = false;
-        const auto bytes = readFile(path, image, truncated);
+        const auto bytes = readFile(path, image || pdf, truncated);
         reply[QStringLiteral("ok")] = true;
-        if (!image) {
+        if (!image && !pdf) {
             reply[QStringLiteral("kind")] = QStringLiteral("text");
             reply[QStringLiteral("text")] = textPreview(bytes, truncated);
             reply[QStringLiteral("truncated")] = truncated;
@@ -241,30 +243,36 @@ QByteArray previewDocument(const PreviewRequest &request) {
                 QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
             reply[QStringLiteral("hash")] = hash;
             reply[QStringLiteral("first_frame")] = extension == u"gif";
+            reply[QStringLiteral("first_page")] = pdf;
             if (hash == request.cached_hash) {
                 reply[QStringLiteral("kind")] = QStringLiteral("cached");
             } else {
-                QImageReader::setAllocationLimit(64);
-                QBuffer input;
-                input.setData(bytes);
-                input.open(QIODevice::ReadOnly);
-                QImageReader reader(&input, extension == u"png"   ? "png"
-                                            : extension == u"gif" ? "gif"
-                                                                  : "jpeg");
-                reader.setAutoDetectImageFormat(false);
-                const auto size = reader.size();
-                validateImageSize(size);
-                auto scaled = size.scaled(256, 256, Qt::KeepAspectRatio);
-                scaled.setWidth(std::max(1, scaled.width()));
-                scaled.setHeight(std::max(1, scaled.height()));
-                reader.setScaledSize(scaled);
-                auto thumbnail = reader.read();
-                if (thumbnail.isNull()) {
-                    throw std::runtime_error("Corrupt or unsupported image");
+                QImage thumbnail;
+                if (pdf) {
+                    thumbnail = renderPdfFirstPage(bytes);
+                } else {
+                    QImageReader::setAllocationLimit(64);
+                    QBuffer input;
+                    input.setData(bytes);
+                    input.open(QIODevice::ReadOnly);
+                    QImageReader reader(&input, extension == u"png"   ? "png"
+                                                : extension == u"gif" ? "gif"
+                                                                      : "jpeg");
+                    reader.setAutoDetectImageFormat(false);
+                    const auto size = reader.size();
+                    validateImageSize(size);
+                    auto scaled = size.scaled(256, 256, Qt::KeepAspectRatio);
+                    scaled.setWidth(std::max(1, scaled.width()));
+                    scaled.setHeight(std::max(1, scaled.height()));
+                    reader.setScaledSize(scaled);
+                    thumbnail = reader.read();
+                    if (thumbnail.isNull()) {
+                        throw std::runtime_error("Corrupt or unsupported image");
+                    }
+                    thumbnail =
+                        thumbnail.scaled(scaled, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+                            .convertToFormat(QImage::Format_RGBA8888);
                 }
-                thumbnail =
-                    thumbnail.scaled(scaled, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
-                        .convertToFormat(QImage::Format_RGBA8888);
                 const auto length = thumbnail.width() * thumbnail.height() * 4;
                 const QByteArray raw(reinterpret_cast<const char *>(thumbnail.constBits()), length);
                 reply[QStringLiteral("kind")] = QStringLiteral("image");

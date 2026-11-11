@@ -9,7 +9,8 @@ The selected Phase 2 Windows search window is tested locally and in hosted MSVC
 Debug/Release CI; [evidence](desktop-search-verification.md) records the verified
 revision. The authorized Windows Phase 2 first-batch scope passed local and hosted checks;
 [acceptance evidence](phase2-acceptance.md) identifies the verified revision.
-PDF previews, multi-root/CLI watch and later phases remain planned.
+Multi-root/CLI watch and later phases remain planned. The separately authorized
+PDF first-page extension is under verification; see [evidence](pdf-preview-verification.md).
 The separately authorized GIF first-frame extension passed local and hosted
 Windows checks; see [verification evidence](gif-preview-verification.md).
 This is not a formal release.
@@ -63,7 +64,8 @@ Further work is prioritized for Windows; release packaging is out of scope.
 | 2 | Opt-in isolated text/source/PNG/JPEG previews, bounded thumbnails | Tested |
 | 2 | Escape hide with active hotkey and optional non-sensitive preferences | Tested |
 | 2 extension | Opt-in GIF first-frame preview, explicit static label and existing limits | Tested |
-| Future | Multi-root/CLI watch and PDF preview | Planned |
+| 2 extension | Opt-in isolated PDF first-page preview using pinned Poppler | In Progress |
+| Future | Multi-root/CLI watch and PDF navigation/interaction | Planned |
 | 3 | Analysis, duplicates, organizer, rename, journal | Planned |
 | 4 | Project launcher, opt-in clipboard, activity | Planned |
 | 5 | Opt-in semantic search, backup and restore | Planned |

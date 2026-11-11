@@ -21,6 +21,14 @@
             "jpeg",
             "png"
           ]
+        },
+        {
+          "name": "poppler",
+          "platform": "windows",
+          "default-features": false,
+          "features": [
+            "zlib"
+          ]
         }
       ]
     }
