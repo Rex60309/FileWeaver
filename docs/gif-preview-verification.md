@@ -42,7 +42,7 @@ Windows 11, GCC 13.2.0, Qt 6.11.3, CMake 3.29.2. Local results so far:
 | GIF focused fixture | Passed |
 | Core format/lint | Passed |
 | Desktop format/lint | Passed |
-| Hosted Windows/MSVC and sanitizer CI | Not yet run for this revision |
+| Hosted Windows/MSVC and sanitizer CI | All four jobs passed for corrected revision 2330115 |
 
 ## Exact commands
 
@@ -113,7 +113,7 @@ Both final full CTest runs passed **15/15**. Core Debug/Release remained **13/13
 The usual desktop application targets rebuilt successfully after this cleanup.
 Final desktop format and static analysis passed after this cleanup.
 
-## Hosted verification checkpoint
+## Historical initial hosted checkpoint
 
 Source revision `a331beabab52b83fdb8944e5bf5d07e1801d5dd9` was pushed to
 `feat/windows-gif-preview`. [Quality run 43062161091](https://github.com/Rex60309/FileWeaver/actions/runs/43062161091)
@@ -143,3 +143,41 @@ Both passed **15/15** after the MSVC shift-type correction, with TEMP/TMP explic
 set to build/test-temp. Primary desktop application targets also rebuilt. The
 helper arithmetic change does not affect core source or the prior core 13/13
 results. Final format/lint passed before the correction commit.
+
+## Historical correction hosted checkpoint
+
+Source revision `233011552cc6570ff2857a1df8cb6ecb31f9e44b` is under verification in
+[quality run 43073266927](https://github.com/Rex60309/FileWeaver/actions/runs/43073266927).
+Windows core (130706449943), Ubuntu core (130706449686), and analysis/ASan/UBSan
+(130706449290) passed. Desktop job 130706449786 is preparing Qt dependencies;
+MSVC correction acceptance remains pending until both desktop configurations pass.
+
+## Final acceptance — 2026-11-12
+
+[Quality run 43073266927](https://github.com/Rex60309/FileWeaver/actions/runs/43073266927)
+completed successfully for **233011552cc6570ff2857a1df8cb6ecb31f9e44b**:
+
+| Job | Actual result |
+| --- | --- |
+| Windows desktop 130706449786 | MSVC Debug/Release builds and CTest **15/15 each** |
+| Windows core 130706449943 | Debug/Release build and complete tests passed |
+| Ubuntu core 130706449686 | Debug/Release build and complete tests passed |
+| Analysis 130706449290 | Format, lint and supported Clang ASan/UBSan passed |
+
+Desktop log records 15/15 at 2026-11-11 18:59:01 UTC (Debug) and 19:01:34 UTC
+(Release). Its fresh checkout confirms the MSVC C4334 correction and actual GIF
+plugin deployment independently of the local generated-executable lock issue.
+The prior failed run remains documented above and is not counted as acceptance.
+
+The authorized Windows GIF first-frame milestone is complete. README usage and
+feature status now match the verified implementation. No user files, database
+schema, package manifest, runtime networking or activation defaults changed.
+Source GIF bytes remain read-only; no content is persisted by preview. Limits and
+process/permissions-isolation limitations remain as documented. PDF, GIF animation,
+Linux desktop and Phase 3-5 are not part of this milestone. A separately authorized
+PDF preview design is the next smallest product extension.
+
+The final acceptance update is documentation-only and uses `[skip ci]`: executable
+source, tests, manifest and workflow remain identical to the verified revision.
+No failed test is bypassed, no release package is created, and this is not a
+formal release-readiness claim.
