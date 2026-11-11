@@ -85,6 +85,67 @@ QByteArray readFile(const QString &path, bool image, bool &truncated) {
     }
     return result;
 }
+void validateImageSize(const QSize &size) {
+    if (!size.isValid() || size.width() < 1 || size.height() < 1 || size.width() > 8192 ||
+        size.height() > 8192 ||
+        static_cast<qint64>(size.width()) * size.height() > qint64{16} * 1024 * 1024) {
+        throw std::runtime_error("Invalid image or image exceeds pixel/dimension limits");
+    }
+}
+void validateGifFirstFrame(const QByteArray &bytes) {
+    if (bytes.size() < 13 || (!bytes.startsWith("GIF87a") && !bytes.startsWith("GIF89a"))) {
+        throw std::runtime_error("Invalid GIF header");
+    }
+    const auto dimension = [&bytes](qsizetype offset) {
+        return static_cast<int>(static_cast<unsigned char>(bytes[offset])) +
+               256 * static_cast<int>(static_cast<unsigned char>(bytes[offset + 1]));
+    };
+    const QSize canvas(dimension(6), dimension(8));
+    validateImageSize(canvas);
+    const auto packed = static_cast<unsigned char>(bytes[10]);
+    qsizetype position = 13;
+    if ((packed & 0x80U) != 0) {
+        position += qsizetype{3} * (1U << ((packed & 7U) + 1U));
+    }
+    if (position > bytes.size()) {
+        throw std::runtime_error("Incomplete GIF color table");
+    }
+    // Skip bounded extension sub-blocks without interpreting their payloads.
+    // Inspect only the first image descriptor; never enumerate animation frames.
+    while (position < bytes.size()) {
+        const auto tag = static_cast<unsigned char>(bytes[position++]);
+        if (tag == 0x2c) {
+            if (bytes.size() - position < 9) {
+                throw std::runtime_error("Incomplete GIF image descriptor");
+            }
+            const QSize frame(dimension(position + 4), dimension(position + 6));
+            validateImageSize(frame);
+            if (dimension(position) + frame.width() > canvas.width() ||
+                dimension(position + 2) + frame.height() > canvas.height()) {
+                throw std::runtime_error("GIF first frame exceeds its canvas");
+            }
+            return;
+        }
+        if (tag != 0x21 || position == bytes.size()) {
+            throw std::runtime_error("GIF has no supported first frame");
+        }
+        ++position; // Extension label, not an instruction or external resource.
+        for (;;) {
+            if (position == bytes.size()) {
+                throw std::runtime_error("Incomplete GIF extension");
+            }
+            const auto count = static_cast<unsigned char>(bytes[position++]);
+            if (count == 0) {
+                break;
+            }
+            if (count > bytes.size() - position) {
+                throw std::runtime_error("Incomplete GIF extension payload");
+            }
+            position += count;
+        }
+    }
+    throw std::runtime_error("GIF has no first frame");
+}
 QString textPreview(QByteArray bytes, bool &truncated) {
     QString text;
     if (bytes.startsWith("\xff\xfe") || bytes.startsWith("\xfe\xff")) {
@@ -146,7 +207,8 @@ QByteArray previewDocument(const PreviewRequest &request) {
     QJsonObject reply;
     try {
         const auto extension = QFileInfo(path).suffix().toLower();
-        const bool image = extension == u"png" || extension == u"jpg" || extension == u"jpeg";
+        const bool image = extension == u"png" || extension == u"jpg" || extension == u"jpeg" ||
+                           extension == u"gif";
         const QStringList text_types{
             QStringLiteral("txt"),  QStringLiteral("md"),  QStringLiteral("markdown"),
             QStringLiteral("json"), QStringLiteral("xml"), QStringLiteral("csv"),
@@ -170,9 +232,13 @@ QByteArray previewDocument(const PreviewRequest &request) {
             reply[QStringLiteral("text")] = textPreview(bytes, truncated);
             reply[QStringLiteral("truncated")] = truncated;
         } else {
+            if (extension == u"gif") {
+                validateGifFirstFrame(bytes);
+            }
             const auto hash = QString::fromLatin1(
                 QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
             reply[QStringLiteral("hash")] = hash;
+            reply[QStringLiteral("first_frame")] = extension == u"gif";
             if (hash == request.cached_hash) {
                 reply[QStringLiteral("kind")] = QStringLiteral("cached");
             } else {
@@ -180,14 +246,12 @@ QByteArray previewDocument(const PreviewRequest &request) {
                 QBuffer input;
                 input.setData(bytes);
                 input.open(QIODevice::ReadOnly);
-                QImageReader reader(&input, extension == u"png" ? "png" : "jpeg");
+                QImageReader reader(&input, extension == u"png"   ? "png"
+                                            : extension == u"gif" ? "gif"
+                                                                  : "jpeg");
                 reader.setAutoDetectImageFormat(false);
                 const auto size = reader.size();
-                if (!size.isValid() || size.width() > 8192 || size.height() > 8192 ||
-                    static_cast<qint64>(size.width()) * size.height() > qint64{16} * 1024 * 1024) {
-                    throw std::runtime_error(
-                        "Invalid image or image exceeds pixel/dimension limits");
-                }
+                validateImageSize(size);
                 auto scaled = size.scaled(256, 256, Qt::KeepAspectRatio);
                 scaled.setWidth(std::max(1, scaled.width()));
                 scaled.setHeight(std::max(1, scaled.height()));

@@ -145,11 +145,15 @@ if(FILEWEAVER_BUILD_DESKTOP)
       COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:Qt6::${plugin_target}>"
         "$<TARGET_FILE_DIR:${executable_target}>/platforms" VERBATIM)
   endforeach()
+  if(NOT TARGET Qt6::QGifPlugin)
+    message(FATAL_ERROR "GIF first-frame preview requires the existing Qt GIF image plugin")
+  endif()
   if(NOT TARGET Qt6::QJpegPlugin)
     message(FATAL_ERROR "PNG/JPEG preview requires the approved qtbase jpeg/png features")
   endif()
   add_custom_command(TARGET fileweaver-preview-worker POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:fileweaver-preview-worker>/imageformats"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:Qt6::QGifPlugin>" "$<TARGET_FILE_DIR:fileweaver-preview-worker>/imageformats"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:Qt6::QJpegPlugin>" "$<TARGET_FILE_DIR:fileweaver-preview-worker>/imageformats"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:libjpeg-turbo::jpeg>" "$<TARGET_FILE_DIR:fileweaver-preview-worker>" VERBATIM)
   if(TARGET Qt6::QModernWindowsStylePlugin)

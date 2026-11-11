@@ -14,6 +14,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <QImageReader>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QKeySequenceEdit>
@@ -182,6 +183,88 @@ class Phase2Tests final : public QObject {
         reply = runPreview({thin, {}}, {}, process());
         QVERIFY(reply.ok);
         QCOMPARE(reply.image.height(), 1);
+    }
+    void gifPreviewShowsOnlyFirstFrameAndRetainsLimits() {
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+        const auto path = native(temp.filePath(QStringLiteral("動畫 日本語.gif")));
+        const auto header = QByteArray::fromHex("47494638396101000100800000ff00000000ff");
+        const auto red = QByteArray::fromHex("21f90400010000002c0000000001000100000202440100");
+        const auto blue = QByteArray::fromHex("21f90400010000002c00000000010001000002024c0100");
+        const auto animated = header + red + blue + QByteArray::fromHex("3b");
+        write(path, animated);
+        {
+            QImageReader fixture(path, "gif");
+            QCOMPARE(fixture.read().pixelColor(0, 0), QColor(Qt::red));
+            QCOMPARE(fixture.read().pixelColor(0, 0), QColor(Qt::blue));
+        }
+        auto reply = runPreview({path, {}}, {}, process());
+        QVERIFY2(reply.ok, qPrintable(reply.message));
+        QCOMPARE(reply.image.pixelColor(0, 0), QColor(Qt::red));
+        QVERIFY(reply.first_frame);
+        QVERIFY(reply.message.contains(QStringLiteral("GIF 首張畫面")));
+        QVERIFY(reply.message.contains(QStringLiteral("不播放動畫")));
+        const auto hash = reply.hash;
+        auto invalid_flag = QJsonDocument::fromJson(previewDocument({path, {}})).object();
+        invalid_flag[QStringLiteral("first_frame")] = QStringLiteral("true");
+        QVERIFY(!parsePreview(QJsonDocument(invalid_flag).toJson()).ok);
+        reply = runPreview({path, hash}, {}, process());
+        QVERIFY(reply.ok);
+        QVERIFY(reply.cached);
+        QVERIFY(reply.first_frame);
+        QVERIFY(reply.message.contains(QStringLiteral("GIF 首張畫面")));
+        QFile unchanged(path);
+        QVERIFY(unchanged.open(QIODevice::ReadOnly));
+        QCOMPARE(unchanged.readAll(), animated);
+        unchanged.close();
+        write(path, header + red + QByteArray::fromHex("3b"));
+        reply = runPreview({path, hash}, {}, process());
+        QVERIFY(reply.ok);
+        QVERIFY(!reply.cached);
+        QVERIFY(reply.hash != hash);
+        QCOMPARE(reply.image.pixelColor(0, 0), QColor(Qt::red));
+        for (const auto &invalid :
+             {QByteArray("GIF89a"), header.left(18), header + QByteArray::fromHex("3b"),
+              header + QByteArray::fromHex("2c0000"), header + QByteArray::fromHex("21f9"),
+              header + QByteArray::fromHex("21f90400"),
+              header + QByteArray::fromHex("21f90400000000")}) {
+            write(path, invalid);
+            QVERIFY(!runPreview({path, {}}, {}, process()).ok);
+        }
+        auto gif87 = header;
+        gif87[4] = '7';
+        write(path, gif87 + red.mid(8) + QByteArray::fromHex("3b"));
+        QVERIFY(runPreview({path, {}}, {}, process()).ok);
+        auto outside_canvas = red;
+        outside_canvas[9] = char{1};
+        write(path, header + outside_canvas + QByteArray::fromHex("3b"));
+        QVERIFY(!runPreview({path, {}}, {}, process()).ok);
+        auto zero_canvas = header;
+        zero_canvas[6] = char{0};
+        write(path, zero_canvas + red + QByteArray::fromHex("3b"));
+        QVERIFY(!runPreview({path, {}}, {}, process()).ok);
+        auto pixel_limit = header;
+        pixel_limit[6] = char{0};
+        pixel_limit[7] = char{32};
+        pixel_limit[8] = char{0};
+        pixel_limit[9] = char{32};
+        write(path, pixel_limit + red + QByteArray::fromHex("3b"));
+        QVERIFY(!runPreview({path, {}}, {}, process()).ok);
+        auto oversized_dimensions = header;
+        oversized_dimensions[6] = char{1};
+        oversized_dimensions[7] = char{32};
+        write(path, oversized_dimensions + red + QByteArray::fromHex("3b"));
+        QVERIFY(!runPreview({path, {}}, {}, process()).ok);
+        auto oversized_frame = red;
+        oversized_frame[13] = char{1};
+        oversized_frame[14] = char{32};
+        write(path, header + oversized_frame + QByteArray::fromHex("3b"));
+        QVERIFY(!runPreview({path, {}}, {}, process()).ok);
+        write(path, QByteArray(8 * 1024 * 1024 + 1, 'x'));
+        QVERIFY(!runPreview({path, {}}, {}, process()).ok);
+        std::stop_source stopped;
+        stopped.request_stop();
+        QVERIFY(!runPreview({path, {}}, stopped.get_token(), process()).ok);
     }
     void previewProcessProtocolTimeoutAndCancellation() {
         const auto worker = process("preview_test_worker.exe");

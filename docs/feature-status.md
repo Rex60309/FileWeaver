@@ -9,7 +9,8 @@ The selected Phase 2 Windows search window is tested locally and in hosted MSVC
 Debug/Release CI; [evidence](desktop-search-verification.md) records the verified
 revision. The authorized Windows Phase 2 first-batch scope passed local and hosted checks;
 [acceptance evidence](phase2-acceptance.md) identifies the verified revision.
-PDF/GIF second-batch previews, multi-root/CLI watch and later phases remain planned.
+PDF previews, multi-root/CLI watch and later phases remain planned.
+The separately authorized GIF first-frame extension is in progress.
 This is not a formal release.
 The Windows global-hotkey slice also passed native interaction and hosted MSVC
 Debug/Release checks; see [its acceptance evidence](global-hotkey-verification.md).
@@ -60,7 +61,8 @@ Further work is prioritized for Windows; release packaging is out of scope.
 | 2 | Glob/literal path/fuzzy parent components and visual filters/sort | Tested |
 | 2 | Opt-in isolated text/source/PNG/JPEG previews, bounded thumbnails | Tested |
 | 2 | Escape hide with active hotkey and optional non-sensitive preferences | Tested |
-| Future | Multi-root/CLI watch and PDF/GIF second preview batch | Planned |
+| 2 extension | Opt-in GIF first-frame preview, explicit static label and existing limits | In Progress |
+| Future | Multi-root/CLI watch and PDF preview | Planned |
 | 3 | Analysis, duplicates, organizer, rename, journal | Planned |
 | 4 | Project launcher, opt-in clipboard, activity | Planned |
 | 5 | Opt-in semantic search, backup and restore | Planned |

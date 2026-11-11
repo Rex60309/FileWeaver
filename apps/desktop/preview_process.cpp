@@ -120,6 +120,12 @@ PreviewReply parsePreview(const QByteArray &payload) {
         reply.truncated = object.value(QStringLiteral("truncated")).toBool();
         reply.ok = true;
     } else if (kind == u"image" || kind == u"cached") {
+        const auto first_frame = object.value(QStringLiteral("first_frame"));
+        if (!first_frame.isUndefined() && !first_frame.isBool()) {
+            reply.message = QStringLiteral("縮圖畫面標記無效。");
+            return reply;
+        }
+        reply.first_frame = first_frame.toBool();
         reply.hash = object.value(QStringLiteral("hash")).toString();
         if (!hashValid(reply.hash)) {
             reply.message = QStringLiteral("縮圖驗證碼無效。");
@@ -156,7 +162,8 @@ PreviewReply parsePreview(const QByteArray &payload) {
         return reply;
     }
     reply.message =
-        reply.truncated
+        reply.first_frame ? QStringLiteral("GIF 首張畫面預覽（不播放動畫）；唯讀且不執行文件指令。")
+        : reply.truncated
             ? QStringLiteral("僅顯示檔案前 64 KiB／2000 行以內；不執行程式碼或文件指令。")
             : QStringLiteral("唯讀預覽；不執行程式碼或文件指令。");
     return reply;

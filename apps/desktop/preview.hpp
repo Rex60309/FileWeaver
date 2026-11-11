@@ -19,6 +19,7 @@ struct PreviewReply {
     QString hash{};
     bool cached = false;
     bool truncated = false;
+    bool first_frame = false;
 };
 struct PreviewProcess {
     std::filesystem::path executable;
