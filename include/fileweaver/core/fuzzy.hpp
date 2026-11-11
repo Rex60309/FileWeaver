@@ -15,18 +15,22 @@ struct FuzzyWeights {
     int token = 300;
     int subsequence = 100;
     int typo = 50;
+    int path = 50;
 };
 struct FuzzyOptions {
     std::size_t candidate_limit = 4096;
     FuzzyWeights weights{};
+    bool path_components = false;
 };
 // Unicode scalar matching, ASCII case folding only. No filesystem or Qt dependency.
 class FuzzyMatcher {
   public:
     explicit FuzzyMatcher(std::string_view query, FuzzyWeights weights = {});
-    [[nodiscard]] bool candidate(std::string_view name, const std::stop_token &stop = {}) const;
+    [[nodiscard]] bool candidate(std::string_view name, const std::stop_token &stop = {},
+                                 std::string_view path = {}) const;
     [[nodiscard]] std::optional<std::int64_t> score(std::string_view name,
-                                                    const std::stop_token &stop = {}) const;
+                                                    const std::stop_token &stop = {},
+                                                    std::string_view path = {}) const;
 
   private:
     std::u32string query_;

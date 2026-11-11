@@ -1,5 +1,6 @@
 #pragma once
 
+#include "local_file.hpp"
 #include <QObject>
 #include <QString>
 #include <condition_variable>
@@ -21,7 +22,6 @@ struct FileOpenApi {
     std::function<QString(const QString &, const std::stop_token &)> inspect;
     std::function<QString(const QString &)> launch;
 };
-[[nodiscard]] QString fileLocationPolicyError(const QString &path);
 [[nodiscard]] QString fileOpenPolicyError(const QString &path);
 [[nodiscard]] FileOpenApi windowsFileOpenApi();
 [[nodiscard]] FileOpenApi windowsRevealFileApi();

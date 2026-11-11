@@ -1,4 +1,6 @@
 #include "search_window.hpp"
+#include "fileweaver/core/utc_time.hpp"
+#include "preview_highlighter.hpp"
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
@@ -9,6 +11,7 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
+#include <QFontDatabase>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -18,11 +21,13 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
+#include <QPixmap>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QSplitter>
 #include <QStandardItemModel>
 #include <QStyle>
 #include <QTimeZone>
@@ -30,6 +35,7 @@
 #include <QVBoxLayout>
 #include <algorithm>
 #include <array>
+#include <exception>
 #include <memory>
 #include <utility>
 
@@ -60,6 +66,9 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     : QWidget(parent), hotkey_(std::move(hotkey_api)), controller_(std::move(search)),
       opener_(std::move(open_file), nullptr, std::move(reveal_file)),
       watcher_(std::move(watch_api)) {
+    auto initial_font = this->font();
+    initial_font.setPointSize(10);
+    setFont(initial_font);
     setWindowTitle(QStringLiteral("FileWeaver — 檔名搜尋"));
     setWindowIcon(style()->standardIcon(QStyle::SP_FileDialogContentsView));
     resize(1000, 650);
@@ -97,18 +106,24 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     mode_->setObjectName(QStringLiteral("mode"));
     mode_->setAccessibleName(QStringLiteral("比對方式"));
     mode_->addItems({QStringLiteral("包含文字"), QStringLiteral("檔名開頭"),
-                     QStringLiteral("完整檔名"), QStringLiteral("模糊檔名")});
+                     QStringLiteral("完整檔名"), QStringLiteral("模糊檔名"),
+                     QStringLiteral("Glob 檔名"), QStringLiteral("包含路徑"),
+                     QStringLiteral("模糊路徑")});
     auto *fuzzy_settings = new QPushButton(QStringLiteral("模糊設定…"), this);
     fuzzy_settings->setObjectName(QStringLiteral("fuzzySettingsButton"));
     fuzzy_settings->setEnabled(false);
     connect(fuzzy_settings, &QPushButton::clicked, this, &SearchWindow::configureFuzzy);
     connect(mode_, &QComboBox::currentIndexChanged, this,
-            [fuzzy_settings](int index) { fuzzy_settings->setEnabled(index == 3); });
+            [fuzzy_settings](int index) { fuzzy_settings->setEnabled(index == 3 || index == 6); });
+    auto *filter_settings = new QPushButton(QStringLiteral("篩選／排序…"), this);
+    filter_settings->setObjectName(QStringLiteral("filterSettingsButton"));
+    connect(filter_settings, &QPushButton::clicked, this, &SearchWindow::configureFilters);
     auto *search_button = new QPushButton(QStringLiteral("搜尋"), this);
     search_button->setObjectName(QStringLiteral("search"));
     search_row->addWidget(query_, 1);
     search_row->addWidget(mode_);
     search_row->addWidget(fuzzy_settings);
+    search_row->addWidget(filter_settings);
     search_row->addWidget(search_button);
     layout->addLayout(search_row.release());
     auto hotkey_row = std::make_unique<QHBoxLayout>();
@@ -122,13 +137,83 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     hotkey_row->addWidget(hotkey_sequence_);
     hotkey_row->addStretch();
     layout->addLayout(hotkey_row.release());
-    hotkey_status_ = new QLabel(QStringLiteral("快捷鍵未啟用；設定僅供本次執行使用。"), this);
+    hotkey_status_ =
+        new QLabel(QStringLiteral("快捷鍵未啟用；可選擇記住組合，下次仍需手動啟用。"), this);
     hotkey_status_->setObjectName(QStringLiteral("hotkeyStatus"));
     hotkey_status_->setTextFormat(Qt::PlainText);
     hotkey_status_->setWordWrap(true);
     layout->addWidget(hotkey_status_);
     connect(hotkey_enabled_, &QCheckBox::toggled, this, &SearchWindow::updateHotkey);
     connect(&hotkey_, &GlobalHotkey::activated, this, &SearchWindow::activateSearch);
+    auto *preferences_row = new QHBoxLayout();
+    remember_ = new QCheckBox(QStringLiteral("記住非敏感偏好設定"), this);
+    remember_->setObjectName(QStringLiteral("rememberPreferences"));
+    remember_->setEnabled(false);
+    font_size_ = new QSpinBox(this);
+    font_size_->setObjectName(QStringLiteral("interfaceFontSize"));
+    font_size_->setAccessibleName(QStringLiteral("介面字級"));
+    font_size_->setRange(8, 24);
+    font_size_->setValue(10);
+    preferences_row->addWidget(remember_);
+    preferences_row->addWidget(new QLabel(QStringLiteral("字級"), this));
+    preferences_row->addWidget(font_size_);
+    preferences_row->addStretch();
+    layout->addLayout(preferences_row);
+    preferences_status_ =
+        new QLabel(QStringLiteral("偏好設定不包含查詢、路徑或內容；啟用狀態不保存。"), this);
+    preferences_status_->setObjectName(QStringLiteral("preferencesStatus"));
+    preferences_status_->setTextFormat(Qt::PlainText);
+    preferences_status_->setWordWrap(true);
+    layout->addWidget(preferences_status_);
+    connect(remember_, &QCheckBox::toggled, this, [this] {
+        if (!applying_preferences_) {
+            preferences_dirty_ = true;
+            savePreferences();
+        }
+    });
+    connect(font_size_, &QSpinBox::valueChanged, this, [this](int size) {
+        auto next = this->font();
+        next.setPointSize(size);
+        setFont(next);
+        if (preview_text_) {
+            auto fixed = preview_text_->font();
+            fixed.setPointSize(size);
+            preview_text_->setFont(fixed);
+        }
+        preferenceChanged();
+    });
+    connect(mode_, &QComboBox::currentIndexChanged, this, [this] { preferenceChanged(); });
+    connect(hotkey_sequence_, &QKeySequenceEdit::keySequenceChanged, this,
+            [this] { preferenceChanged(); });
+    connect(&preferences_, &PreferencesController::completed, this,
+            [this](const PreferencesReply &reply) {
+                remember_->setEnabled(true);
+                if (!reply.ok) {
+                    preferences_status_->setText(QStringLiteral("偏好設定未套用／保存：") +
+                                                 preview(reply.error, 512));
+                    return;
+                }
+                if (reply.loaded) {
+                    applying_preferences_ = true;
+                    if (reply.value.enabled && !preferences_dirty_) {
+                        fuzzy_ = reply.value.fuzzy;
+                        sort_ = reply.value.sort < 0 ? std::optional<SearchSort>{}
+                                                     : static_cast<SearchSort>(reply.value.sort);
+                        descending_ = reply.value.descending;
+                        result_limit_ = static_cast<std::size_t>(reply.value.limit);
+                        hotkey_sequence_->setKeySequence(QKeySequence::fromString(
+                            reply.value.hotkey, QKeySequence::PortableText));
+                        mode_->setCurrentIndex(reply.value.mode);
+                        font_size_->setValue(reply.value.font);
+                    }
+                    remember_->setChecked(reply.value.enabled);
+                    applying_preferences_ = false;
+                }
+                preferences_status_->setText(
+                    reply.value.enabled
+                        ? QStringLiteral("已保存非敏感偏好；快捷鍵、監控與預覽仍需每次手動啟用。")
+                        : QStringLiteral("未保存偏好；啟用狀態與內容不會保存。"));
+            });
     auto watch_row = std::make_unique<QHBoxLayout>();
     watch_load_ = new QPushButton(QStringLiteral("載入監控根目錄"), this);
     watch_load_->setObjectName(QStringLiteral("watchLoad"));
@@ -202,7 +287,79 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     results_->setColumnWidth(0, 285);
     results_->setColumnWidth(1, 460);
     results_->header()->setStretchLastSection(true);
-    layout->addWidget(results_, 1);
+    auto *preview_row = new QHBoxLayout();
+    preview_enabled_ = new QCheckBox(QStringLiteral("啟用內容預覽（讀取選取檔案）"), this);
+    preview_enabled_->setObjectName(QStringLiteral("previewEnabled"));
+    auto *clear_preview = new QPushButton(QStringLiteral("清除預覽快取"), this);
+    clear_preview->setObjectName(QStringLiteral("previewClear"));
+    auto *external_open = new QPushButton(QStringLiteral("以預設程式開啟…"), this);
+    external_open->setObjectName(QStringLiteral("previewOpen"));
+    preview_row->addWidget(preview_enabled_);
+    preview_row->addWidget(clear_preview);
+    preview_row->addWidget(external_open);
+    preview_row->addStretch();
+    layout->addLayout(preview_row);
+    auto *splitter = new QSplitter(Qt::Horizontal, this);
+    splitter->addWidget(results_);
+    preview_pane_ = new QWidget(splitter);
+    preview_pane_->setObjectName(QStringLiteral("previewPane"));
+    auto *preview_layout = new QVBoxLayout(preview_pane_);
+    preview_status_ = new QLabel(QStringLiteral("預覽未啟用；不會讀取檔案內容。"), preview_pane_);
+    preview_status_->setObjectName(QStringLiteral("previewStatus"));
+    preview_status_->setTextFormat(Qt::PlainText);
+    preview_status_->setWordWrap(true);
+    preview_status_->setMaximumHeight(96);
+    preview_image_ = new QLabel(preview_pane_);
+    preview_image_->setObjectName(QStringLiteral("previewImage"));
+    preview_image_->setAlignment(Qt::AlignCenter);
+    preview_text_ = new QPlainTextEdit(preview_pane_);
+    preview_text_->setObjectName(QStringLiteral("previewText"));
+    preview_text_->setAccessibleName(QStringLiteral("唯讀內容預覽"));
+    preview_text_->setReadOnly(true);
+    preview_text_->setUndoRedoEnabled(false);
+    preview_text_->setMaximumBlockCount(2001);
+    preview_text_->setLineWrapMode(QPlainTextEdit::NoWrap);
+    auto preview_font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    preview_font.setPointSize(font_size_->value());
+    preview_text_->setFont(preview_font);
+    new PreviewHighlighter(preview_text_->document());
+    preview_layout->addWidget(preview_status_);
+    preview_layout->addWidget(preview_image_);
+    preview_layout->addWidget(preview_text_, 1);
+    splitter->addWidget(preview_pane_);
+    splitter->setStretchFactor(0, 2);
+    splitter->setStretchFactor(1, 1);
+    preview_pane_->hide();
+    layout->addWidget(splitter, 1);
+    connect(preview_enabled_, &QCheckBox::toggled, this, [this](bool enabled) {
+        preview_pane_->setVisible(enabled);
+        previewer_.clear();
+        preview_text_->clear();
+        preview_image_->clear();
+        requestPreview();
+    });
+    connect(clear_preview, &QPushButton::clicked, this, [this] {
+        previewer_.clear();
+        preview_text_->clear();
+        preview_image_->clear();
+        preview_status_->setText(QStringLiteral("快取已要求清除；重新選取檔案可再次預覽。"));
+    });
+    connect(external_open, &QPushButton::clicked, this,
+            [this] { requestSelected(FileAction::open); });
+    connect(&previewer_, &PreviewController::completed, this, [this](const PreviewReply &reply) {
+        if (!preview_enabled_->isChecked()) {
+            return;
+        }
+        preview_text_->clear();
+        preview_image_->clear();
+        preview_status_->setText(preview(reply.message, 512));
+        if (reply.ok) {
+            preview_text_->setPlainText(reply.text);
+            if (!reply.image.isNull()) {
+                preview_image_->setPixmap(QPixmap::fromImage(reply.image));
+            }
+        }
+    });
     auto selection_row = std::make_unique<QHBoxLayout>();
     selected_path_ = new QLineEdit(this);
     selected_path_->setObjectName(QStringLiteral("selectedPath"));
@@ -223,11 +380,12 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     selection_row->addWidget(reveal_);
     selection_row->addWidget(copy_);
     layout->addLayout(selection_row.release());
-    layout->addWidget(new QLabel(QStringLiteral("↓ 進入結果 · ↑ ↓ 選取 · Enter 開啟確認 · "
-                                                "Ctrl+Enter 顯示位置 · Ctrl+C 複製路徑 · Esc 關閉"),
-                                 this));
-    auto *note =
-        new QLabel(QStringLiteral("結果來自索引；檔案變更後請更新索引。最多顯示 100 筆。"), this);
+    layout->addWidget(
+        new QLabel(QStringLiteral("↓ 進入結果 · ↑ ↓ 選取 · Enter 開啟確認 · "
+                                  "Ctrl+Enter 顯示位置 · Ctrl+C 複製路徑 · Esc 隱藏／關閉"),
+                   this));
+    auto *note = new QLabel(
+        QStringLiteral("結果來自索引；檔案變更後請更新索引。上限可在篩選／排序調整。"), this);
     note->setWordWrap(true);
     layout->addWidget(note);
     debounce_.setSingleShot(true);
@@ -261,7 +419,15 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     copy_shortcut->setContext(Qt::WidgetWithChildrenShortcut);
     connect(copy_shortcut, &QShortcut::activated, this, &SearchWindow::copyPath);
     auto *close_shortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
-    connect(close_shortcut, &QShortcut::activated, this, &SearchWindow::close);
+    connect(close_shortcut, &QShortcut::activated, this, [this] {
+        if (hotkey_.isEnabled()) {
+            preview_enabled_->setChecked(false);
+            previewer_.clear();
+            hide();
+        } else {
+            close();
+        }
+    });
     query_->setFocus();
 }
 
@@ -276,7 +442,7 @@ void SearchWindow::updateHotkey(bool enabled) {
         : hotkey_.isEnabled()
             ? QStringLiteral("已啟用 %1，按下可切回搜尋欄；修改組合前請先停用。")
                   .arg(hotkey_sequence_->keySequence().toString(QKeySequence::NativeText))
-            : QStringLiteral("快捷鍵未啟用；設定僅供本次執行使用。"));
+            : QStringLiteral("快捷鍵未啟用；可選擇記住組合，下次仍需手動啟用。"));
 }
 
 void SearchWindow::activateSearch() {
@@ -288,8 +454,49 @@ void SearchWindow::activateSearch() {
     query_->selectAll();
 }
 
+void SearchWindow::loadPreferences(const QString &path) {
+    preferences_path_ = path;
+    preferences_dirty_ = false;
+    remember_->setEnabled(false);
+    preferences_.load(path);
+}
+void SearchWindow::preferenceChanged() {
+    if (applying_preferences_ || preferences_path_.isEmpty()) {
+        return;
+    }
+    preferences_dirty_ = true;
+    if (remember_->isChecked()) {
+        savePreferences();
+    }
+}
+void SearchWindow::savePreferences() {
+    if (preferences_path_.isEmpty()) {
+        return;
+    }
+    Preferences value;
+    value.enabled = remember_->isChecked();
+    value.fuzzy = fuzzy_;
+    value.hotkey = hotkey_sequence_->keySequence().toString(QKeySequence::PortableText);
+    value.font = font_size_->value();
+    value.mode = mode_->currentIndex();
+    value.sort = sort_ ? static_cast<int>(*sort_) : -1;
+    value.limit = static_cast<int>(result_limit_);
+    value.descending = descending_;
+    preferences_status_->setText(QStringLiteral("正在保存非敏感偏好…"));
+    preferences_.save(preferences_path_, std::move(value));
+}
+void SearchWindow::changeEvent(QEvent *event) {
+    if (event->type() == QEvent::WindowStateChange && isMinimized()) {
+        preview_enabled_->setChecked(false);
+        previewer_.clear();
+    }
+    QWidget::changeEvent(event);
+}
+
 void SearchWindow::setDatabase(const QString &path) {
     watcher_.cancel();
+    previewer_.clear();
+    preview_enabled_->setChecked(false);
     watch_roots_.clear();
     watch_root_->clear();
     watch_scans_ = 0;
@@ -345,6 +552,9 @@ void SearchWindow::showWatchReply(const WatchReply &reply) {
 }
 
 void SearchWindow::clearResults() {
+    previewer_.clear();
+    preview_text_->clear();
+    preview_image_->clear();
     model_->removeRows(0, model_->rowCount());
     selected_path_->clear();
     copy_->setEnabled(false);
@@ -380,16 +590,147 @@ void SearchWindow::searchNow() {
         return;
     }
     SearchRequest request{std::filesystem::path(database_.toStdWString()), query.toStdString()};
-    request.mode = mode_->currentIndex() == 3   ? SearchMode::fuzzy
-                   : mode_->currentIndex() == 1 ? SearchMode::prefix
-                   : mode_->currentIndex() == 2 ? SearchMode::exact
-                                                : SearchMode::substring;
-    if (request.mode == SearchMode::fuzzy) {
-        request.sort = SearchSort::relevance;
-        request.fuzzy = fuzzy_;
-    }
+    const auto mode = mode_->currentIndex();
+    request.mode = mode == 1                ? SearchMode::prefix
+                   : mode == 2              ? SearchMode::exact
+                   : mode == 3 || mode == 6 ? SearchMode::fuzzy
+                   : mode == 4              ? SearchMode::glob
+                   : mode == 5              ? SearchMode::path
+                                            : SearchMode::substring;
+    request.filters = filters_;
+    request.limit = result_limit_;
+    request.descending = descending_;
+    request.sort = sort_.value_or(request.mode == SearchMode::fuzzy ? SearchSort::relevance
+                                                                    : SearchSort::name);
+    request.fuzzy = fuzzy_;
+    request.fuzzy.path_components = mode == 6;
     status_->setText(QStringLiteral("正在搜尋…"));
     controller_.submit(std::move(request));
+}
+
+void SearchWindow::configureFilters() {
+    auto *dialog = new QDialog(this);
+    dialog->setObjectName(QStringLiteral("filterSettings"));
+    dialog->setWindowTitle(QStringLiteral("搜尋篩選與排序（本次執行）"));
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowModality(Qt::WindowModal);
+    auto *layout = new QFormLayout(dialog);
+    const std::array<QString, 6> labels{
+        QStringLiteral("最小位元組（含）"), QStringLiteral("最大位元組（含）"),
+        QStringLiteral("精確根目錄路徑"),   QStringLiteral("修改時間晚於 UTC"),
+        QStringLiteral("修改時間早於 UTC"), QStringLiteral("副檔名")};
+    std::array<QLineEdit *, 6> fields{};
+    for (std::size_t i = 0; i < fields.size(); ++i) {
+        fields[i] = new QLineEdit(dialog);
+        fields[i]->setObjectName(QStringLiteral("filterValue%1").arg(i));
+        fields[i]->setMaxLength(4096);
+        layout->addRow(labels[i], fields[i]);
+    }
+    if (filters_.minimum_size) {
+        fields[0]->setText(QString::number(*filters_.minimum_size));
+    }
+    if (filters_.maximum_size) {
+        fields[1]->setText(QString::number(*filters_.maximum_size));
+    }
+    if (filters_.root) {
+        fields[2]->setText(QString::fromStdWString(filters_.root->native()));
+    }
+    const auto timeText = [](std::optional<std::int64_t> value) {
+        return value ? QDateTime::fromMSecsSinceEpoch(*value / 1000000)
+                           .toUTC()
+                           .toString(QStringLiteral("yyyy-MM-dd'T'HH:mm:ss'Z'"))
+                     : QString{};
+    };
+    fields[3]->setText(timeText(filters_.modified_after));
+    fields[4]->setText(timeText(filters_.modified_before));
+    fields[3]->setPlaceholderText(QStringLiteral("YYYY-MM-DDTHH:MM:SSZ"));
+    fields[4]->setPlaceholderText(QStringLiteral("YYYY-MM-DDTHH:MM:SSZ"));
+    auto *extension_enabled =
+        new QCheckBox(QStringLiteral("使用副檔名條件（空值表示無副檔名）"), dialog);
+    extension_enabled->setObjectName(QStringLiteral("filterExtensionEnabled"));
+    extension_enabled->setChecked(filters_.extension.has_value());
+    if (filters_.extension) {
+        fields[5]->setText(QString::fromStdString(*filters_.extension));
+    }
+    layout->addRow(extension_enabled);
+    auto *sort = new QComboBox(dialog);
+    sort->setObjectName(QStringLiteral("filterSort"));
+    sort->addItems({QStringLiteral("自動（依比對方式）"), QStringLiteral("檔名"),
+                    QStringLiteral("大小"), QStringLiteral("修改時間"),
+                    QStringLiteral("相關度（僅模糊）")});
+    sort->setCurrentIndex(sort_ ? static_cast<int>(*sort_) + 1 : 0);
+    layout->addRow(QStringLiteral("排序"), sort);
+    auto *descending = new QCheckBox(QStringLiteral("主排序遞減（模糊模式不適用）"), dialog);
+    descending->setObjectName(QStringLiteral("filterDescending"));
+    descending->setChecked(descending_);
+    layout->addRow(descending);
+    auto *limit = new QSpinBox(dialog);
+    limit->setObjectName(QStringLiteral("filterLimit"));
+    limit->setRange(1, 1000);
+    limit->setValue(static_cast<int>(result_limit_));
+    layout->addRow(QStringLiteral("結果上限"), limit);
+    auto *error = new QLabel(dialog);
+    error->setObjectName(QStringLiteral("filterError"));
+    error->setTextFormat(Qt::PlainText);
+    error->setWordWrap(true);
+    layout->addRow(error);
+    auto *buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Reset, dialog);
+    layout->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    connect(buttons->button(QDialogButtonBox::Reset), &QPushButton::clicked, dialog,
+            [fields, extension_enabled, sort, descending, limit] {
+                for (auto *field : fields) {
+                    field->clear();
+                }
+                extension_enabled->setChecked(false);
+                sort->setCurrentIndex(0);
+                descending->setChecked(false);
+                limit->setValue(100);
+            });
+    connect(buttons, &QDialogButtonBox::accepted, dialog,
+            [this, dialog, fields, extension_enabled, sort, descending, limit, error] {
+                try {
+                    SearchFilters next;
+                    const auto number = [](const QString &text) -> std::optional<std::int64_t> {
+                        if (text.isEmpty()) {
+                            return std::nullopt;
+                        }
+                        bool ok = false;
+                        const auto value = text.toLongLong(&ok);
+                        if (!ok || value < 0) {
+                            throw std::runtime_error("大小必須是非負整數位元組。");
+                        }
+                        return value;
+                    };
+                    next.minimum_size = number(fields[0]->text());
+                    next.maximum_size = number(fields[1]->text());
+                    if (!fields[2]->text().isEmpty()) {
+                        next.root = std::filesystem::path(fields[2]->text().toStdWString());
+                    }
+                    if (!fields[3]->text().isEmpty()) {
+                        next.modified_after = parse_utc_time(fields[3]->text().toStdString());
+                    }
+                    if (!fields[4]->text().isEmpty()) {
+                        next.modified_before = parse_utc_time(fields[4]->text().toStdString());
+                    }
+                    if (extension_enabled->isChecked()) {
+                        next.extension = fields[5]->text().toStdString();
+                    }
+                    filters_ = std::move(next);
+                    sort_ = sort->currentIndex() == 0
+                                ? std::optional<SearchSort>{}
+                                : static_cast<SearchSort>(sort->currentIndex() - 1);
+                    descending_ = descending->isChecked();
+                    result_limit_ = static_cast<std::size_t>(limit->value());
+                    dialog->accept();
+                    preferenceChanged();
+                    schedule();
+                } catch (const std::exception &failure) {
+                    error->setText(QString::fromUtf8(failure.what()).left(512));
+                }
+            });
+    dialog->open();
 }
 
 void SearchWindow::configureFuzzy() {
@@ -399,14 +740,16 @@ void SearchWindow::configureFuzzy() {
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     dialog->setWindowModality(Qt::WindowModal);
     auto *layout = new QFormLayout(dialog);
-    const std::array<QString, 6> labels{
-        QStringLiteral("完整檔名加分"), QStringLiteral("檔名開頭加分"),
-        QStringLiteral("詞片段分數"),   QStringLiteral("子序列分數"),
-        QStringLiteral("拼字容錯分數"), QStringLiteral("候選上限")};
-    const std::array<int, 6> values{fuzzy_.weights.exact, fuzzy_.weights.prefix,
+    const std::array<QString, 7> labels{
+        QStringLiteral("完整檔名加分"),      QStringLiteral("檔名開頭加分"),
+        QStringLiteral("詞片段分數"),        QStringLiteral("子序列分數"),
+        QStringLiteral("拼字容錯分數"),      QStringLiteral("候選上限"),
+        QStringLiteral("父目錄命中分數上限")};
+    const std::array<int, 7> values{fuzzy_.weights.exact, fuzzy_.weights.prefix,
                                     fuzzy_.weights.token, fuzzy_.weights.subsequence,
-                                    fuzzy_.weights.typo,  static_cast<int>(fuzzy_.candidate_limit)};
-    std::array<QSpinBox *, 6> fields{};
+                                    fuzzy_.weights.typo,  static_cast<int>(fuzzy_.candidate_limit),
+                                    fuzzy_.weights.path};
+    std::array<QSpinBox *, 7> fields{};
     for (std::size_t i = 0; i < fields.size(); ++i) {
         fields[i] = new QSpinBox(dialog);
         fields[i]->setObjectName(QStringLiteral("fuzzyValue%1").arg(i));
@@ -425,8 +768,9 @@ void SearchWindow::configureFuzzy() {
     connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
     connect(dialog, &QDialog::accepted, this, [this, fields] {
         fuzzy_.weights = {fields[0]->value(), fields[1]->value(), fields[2]->value(),
-                          fields[3]->value(), fields[4]->value()};
+                          fields[3]->value(), fields[4]->value(), fields[6]->value()};
         fuzzy_.candidate_limit = static_cast<std::size_t>(fields[5]->value());
+        preferenceChanged();
         schedule();
     });
     dialog->open();
@@ -447,10 +791,10 @@ void SearchWindow::showReply(const SearchReply &reply) {
         name->setData(path, Qt::UserRole);
         model_->appendRow({name.release(), location.release(), size.release()});
     }
-    status_->setText(
-        reply.results.empty()
-            ? QStringLiteral("找不到符合的檔名。")
-            : QStringLiteral("找到 %1 筆結果（最多 100 筆）。").arg(model_->rowCount()));
+    status_->setText(reply.results.empty() ? QStringLiteral("找不到符合的檔名。")
+                                           : QStringLiteral("找到 %1 筆結果（最多 %2 筆）。")
+                                                 .arg(model_->rowCount())
+                                                 .arg(result_limit_));
     if (model_->rowCount() > 0) {
         results_->setCurrentIndex(model_->index(0, 0));
     }
@@ -465,6 +809,25 @@ void SearchWindow::selectResult() {
     copy_->setEnabled(!path.isEmpty());
     open_->setEnabled(!path.isEmpty() && !opener_.isBusy() && confirmation_.isNull());
     reveal_->setEnabled(open_->isEnabled());
+    requestPreview();
+}
+
+void SearchWindow::requestPreview() {
+    preview_text_->clear();
+    preview_image_->clear();
+    if (!preview_enabled_->isChecked() || !isVisible() || isMinimized()) {
+        return;
+    }
+    const auto current = results_->currentIndex();
+    if (!current.isValid()) {
+        previewer_.clear();
+        preview_status_->setText(
+            QStringLiteral("請選取檔案；不支援類型可使用原有確認開啟或複製路徑。"));
+        return;
+    }
+    const auto path = model_->index(current.row(), 0).data(Qt::UserRole).toString();
+    preview_status_->setText(QStringLiteral("正在隔離程序中產生唯讀預覽…"));
+    previewer_.submit(path);
 }
 
 void SearchWindow::requestSelected(FileAction action) {
@@ -575,6 +938,7 @@ void SearchWindow::closeEvent(QCloseEvent *event) {
     controller_.cancel();
     opener_.cancel();
     watcher_.cancel();
+    previewer_.clear();
     if (!confirmation_.isNull()) {
         confirmation_->reject();
     }

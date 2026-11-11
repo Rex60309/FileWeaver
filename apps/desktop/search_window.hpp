@@ -2,6 +2,8 @@
 
 #include "file_open.hpp"
 #include "global_hotkey.hpp"
+#include "preferences.hpp"
+#include "preview_controller.hpp"
 #include "search_controller.hpp"
 #include "watch_controller.hpp"
 #include <QPointer>
@@ -17,6 +19,9 @@ class QLineEdit;
 class QPushButton;
 class QStandardItemModel;
 class QTreeView;
+class QPlainTextEdit;
+class QSpinBox;
+class QEvent;
 
 namespace fileweaver::desktop {
 class SearchWindow final : public QWidget {
@@ -28,10 +33,12 @@ class SearchWindow final : public QWidget {
                           FileOpenController::Open reveal_file = revealSelectedFile,
                           WatchApi watch_api = windowsWatchApi());
     void setDatabase(const QString &path);
+    void loadPreferences(const QString &path);
 
   protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
+    void changeEvent(QEvent *event) override;
 
   private:
     void schedule();
@@ -44,6 +51,25 @@ class SearchWindow final : public QWidget {
     void copyPath();
     void requestSelected(FileAction action);
     void configureFuzzy();
+    void configureFilters();
+    void requestPreview();
+    void preferenceChanged();
+    void savePreferences();
+    QCheckBox *remember_;
+    QSpinBox *font_size_;
+    QLabel *preferences_status_;
+    QString preferences_path_;
+    bool applying_preferences_ = false;
+    bool preferences_dirty_ = false;
+    QCheckBox *preview_enabled_;
+    QLabel *preview_status_;
+    QLabel *preview_image_;
+    QPlainTextEdit *preview_text_ = nullptr;
+    QWidget *preview_pane_;
+    SearchFilters filters_{};
+    std::optional<SearchSort> sort_;
+    bool descending_ = false;
+    std::size_t result_limit_ = 100;
     void updateWatchControls();
     void showWatchReply(const WatchReply &reply);
     std::vector<RootInfo> watch_roots_;
@@ -76,5 +102,7 @@ class SearchWindow final : public QWidget {
     SearchController controller_;
     FileOpenController opener_;
     WatchController watcher_;
+    PreviewController previewer_;
+    PreferencesController preferences_;
 };
 } // namespace fileweaver::desktop

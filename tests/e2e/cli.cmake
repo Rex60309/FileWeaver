@@ -76,7 +76,7 @@ foreach(invalid IN ITEMS 0 -1 10001)
     message(FATAL_ERROR "Invalid limit must fail")
   endif()
 endforeach()
-execute_process(COMMAND "${CLI}" search "quoted" --mode glob --database "${fixture}/test database.sqlite"
+execute_process(COMMAND "${CLI}" search "quoted" --mode unsupported --database "${fixture}/test database.sqlite"
   RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result STREQUAL "2" OR NOT output STREQUAL "" OR NOT error MATCHES "Invalid arguments")
   message(FATAL_ERROR "Unsupported search mode must fail")

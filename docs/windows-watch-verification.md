@@ -133,3 +133,11 @@ work. The current slice deliberately keeps the established conservative behavior
 - https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-readdirectorychangesw
 - https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-cancelioex
 - https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfinalpathnamebyhandlew
+
+## Hosted baseline confirmation (2026-11-11)
+
+The watcher baseline revision 5767cfe4b29890b2a5149b666ddecf606a312971
+completed all four jobs successfully in [quality run 42774849289](https://github.com/Rex60309/FileWeaver/actions/runs/42774849289):
+Windows desktop Debug/Release, Windows core, Ubuntu core and analysis/sanitizers.
+This confirms the previously pending baseline run; it does not validate subsequent
+uncommitted Phase 2 completion changes.

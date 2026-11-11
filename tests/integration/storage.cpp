@@ -4,6 +4,7 @@
 #include "fileweaver/application/inspect.hpp"
 #include "fileweaver/application/refresh.hpp"
 #include "fileweaver/application/search.hpp"
+#include "fileweaver/core/glob.hpp"
 #include "fileweaver/core/storage_error.hpp"
 #include "fileweaver/core/utc_time.hpp"
 #include "fileweaver/core/watch_schedule.hpp"
@@ -2023,4 +2024,41 @@ TEST_CASE("Single-root refresh preserves policy, scope and registration identity
     REQUIRE_THROWS_AS(fileweaver::refresh_root(request, clock), fileweaver::StorageError);
     request.root_id = 0;
     REQUIRE_THROWS_AS(fileweaver::refresh_root(request, clock), fileweaver::StorageError);
+}
+
+TEST_CASE("Glob matching is bounded Unicode-aware and case-sensitive") {
+    using fileweaver::GlobMatcher;
+    REQUIRE(GlobMatcher("*.cpp").matches("日本😀.cpp"));
+    REQUIRE_FALSE(GlobMatcher("*.cpp").matches("UPPER.CPP"));
+    REQUIRE(GlobMatcher("報告?.txt").matches("報告😀.txt"));
+    REQUIRE(GlobMatcher("[a-c]*").matches("beta"));
+    REQUIRE(GlobMatcher("[!a-c]*").matches("日本"));
+    REQUIRE(GlobMatcher("a[[]1].txt").matches("a[1].txt"));
+    REQUIRE(GlobMatcher("[]]").matches("]"));
+    REQUIRE(GlobMatcher("*ab*cd?").matches("zzabxxcd1"));
+    REQUIRE_FALSE(GlobMatcher("*ab*cd?").matches("zzabxxcd"));
+    REQUIRE_THROWS_AS(GlobMatcher("[z-a]"), fileweaver::StorageError);
+    REQUIRE_THROWS_AS(GlobMatcher("[abc"), fileweaver::StorageError);
+    REQUIRE_THROWS_AS(GlobMatcher(std::string(257, '*')), fileweaver::StorageError);
+    std::stop_source stopped;
+    stopped.request_stop();
+    REQUIRE_THROWS_AS(GlobMatcher("*").matches("name", stopped.get_token()),
+                      fileweaver::StorageError);
+    const auto hard = std::string(200, 'a') + "b";
+    REQUIRE_FALSE(GlobMatcher("*a*a*a*a*a*b").matches(hard + "c"));
+}
+TEST_CASE("Fuzzy path tokens match components without crossing separators") {
+    const fileweaver::FuzzyMatcher matcher("img proc fin");
+    REQUIRE_FALSE(matcher.candidate("final.txt"));
+    REQUIRE(matcher.candidate("final.txt", {}, "C:/image_processing/final.txt"));
+    REQUIRE(matcher.score("final.txt", {}, "C:/image_processing/final.txt").has_value());
+    REQUIRE_FALSE(fileweaver::FuzzyMatcher("ab").candidate("z.txt", {}, "C:/a/b/z.txt"));
+    const auto own = fileweaver::FuzzyMatcher("report").score("report.txt");
+    const auto parent =
+        fileweaver::FuzzyMatcher("report").score("other.txt", {}, "C:/report/other.txt");
+    REQUIRE(own.has_value());
+    REQUIRE(parent.has_value());
+    if (own && parent) {
+        REQUIRE(*own > *parent);
+    }
 }

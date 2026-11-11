@@ -16,7 +16,7 @@ option(FILEWEAVER_BUILD_DESKTOP "Build opt-in Windows Qt search window" OFF)
 find_package(CLI11 CONFIG REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(Catch2 3 CONFIG REQUIRED)
-add_library(fileweaver_core src/core/utc_time.cpp src/core/fuzzy.cpp)
+add_library(fileweaver_core src/core/utc_time.cpp src/core/fuzzy.cpp src/core/text.cpp src/core/glob.cpp)
 target_include_directories(fileweaver_core PUBLIC include)
 add_library(fileweaver_storage src/database/initialize.cpp)
 target_include_directories(fileweaver_storage PUBLIC include)
@@ -78,6 +78,8 @@ add_test(NAME prefix-contract COMMAND "${Python3_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/prefix_contract.py" "$<TARGET_FILE:fileweaver>")
 add_test(NAME fuzzy-contract COMMAND "${Python3_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/fuzzy_contract.py" "$<TARGET_FILE:fileweaver>")
+add_test(NAME phase2-search-contract COMMAND "${Python3_EXECUTABLE}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/phase2_search_contract.py" "$<TARGET_FILE:fileweaver>")
 add_test(NAME storage COMMAND storage_tests)
 add_test(NAME cli-contract COMMAND "${CMAKE_COMMAND}"
   "-DCLI=$<TARGET_FILE:fileweaver>" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/cli.cmake")
@@ -90,22 +92,40 @@ if(FILEWEAVER_BUILD_DESKTOP)
   endif()
   find_package(Qt6 6.3 REQUIRED COMPONENTS Widgets Test)
   find_package(Threads REQUIRED)
-  set(DESKTOP_SOURCES apps/desktop/directory_changes.cpp apps/desktop/directory_changes.hpp apps/desktop/watch_controller.cpp apps/desktop/watch_controller.hpp apps/desktop/file_open.cpp apps/desktop/file_open.hpp apps/desktop/global_hotkey.cpp apps/desktop/global_hotkey.hpp apps/desktop/main.cpp apps/desktop/arguments.cpp apps/desktop/arguments.hpp apps/desktop/search_controller.cpp
+  find_package(libjpeg-turbo CONFIG REQUIRED)
+  set(DESKTOP_SOURCES tests/desktop/phase2_test.cpp apps/desktop/preferences.cpp apps/desktop/preferences.hpp apps/desktop/local_file.cpp apps/desktop/local_file.hpp apps/desktop/preview.hpp apps/desktop/preview_document.cpp apps/desktop/preview_process.cpp apps/desktop/preview_controller.cpp apps/desktop/preview_controller.hpp apps/desktop/preview_highlighter.cpp apps/desktop/preview_highlighter.hpp apps/desktop/preview_worker_main.cpp tests/desktop/preview_test_worker.cpp apps/desktop/directory_changes.cpp apps/desktop/directory_changes.hpp apps/desktop/watch_controller.cpp apps/desktop/watch_controller.hpp apps/desktop/file_open.cpp apps/desktop/file_open.hpp apps/desktop/global_hotkey.cpp apps/desktop/global_hotkey.hpp apps/desktop/main.cpp apps/desktop/arguments.cpp apps/desktop/arguments.hpp apps/desktop/search_controller.cpp
     apps/desktop/search_controller.hpp apps/desktop/search_window.cpp
     apps/desktop/search_window.hpp tests/desktop/search_window_test.cpp)
-  set(DESKTOP_TIDY_SOURCES apps/desktop/directory_changes.cpp apps/desktop/watch_controller.cpp apps/desktop/file_open.cpp apps/desktop/global_hotkey.cpp apps/desktop/main.cpp apps/desktop/arguments.cpp apps/desktop/search_controller.cpp
+  set(DESKTOP_TIDY_SOURCES tests/desktop/phase2_test.cpp apps/desktop/preferences.cpp apps/desktop/local_file.cpp apps/desktop/preview_document.cpp apps/desktop/preview_process.cpp apps/desktop/preview_controller.cpp apps/desktop/preview_highlighter.cpp apps/desktop/preview_worker_main.cpp tests/desktop/preview_test_worker.cpp apps/desktop/directory_changes.cpp apps/desktop/watch_controller.cpp apps/desktop/file_open.cpp apps/desktop/global_hotkey.cpp apps/desktop/main.cpp apps/desktop/arguments.cpp apps/desktop/search_controller.cpp
     apps/desktop/search_window.cpp tests/desktop/search_window_test.cpp)
-  add_library(fileweaver_desktop_ui apps/desktop/directory_changes.cpp apps/desktop/directory_changes.hpp apps/desktop/watch_controller.cpp apps/desktop/watch_controller.hpp apps/desktop/file_open.cpp apps/desktop/file_open.hpp apps/desktop/global_hotkey.cpp apps/desktop/global_hotkey.hpp apps/desktop/arguments.cpp apps/desktop/arguments.hpp apps/desktop/search_controller.cpp
+  add_library(fileweaver_local_file apps/desktop/local_file.cpp)
+  target_include_directories(fileweaver_local_file PUBLIC apps/desktop)
+  target_link_libraries(fileweaver_local_file PUBLIC Qt6::Core)
+  add_library(fileweaver_preview apps/desktop/preview_document.cpp apps/desktop/preview_process.cpp)
+  target_include_directories(fileweaver_preview PUBLIC apps/desktop)
+  target_link_libraries(fileweaver_preview PUBLIC fileweaver_local_file Qt6::Gui)
+  qt_add_executable(fileweaver-preview-worker apps/desktop/preview_worker_main.cpp)
+  set_target_properties(fileweaver-preview-worker PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(fileweaver-preview-worker PRIVATE fileweaver_preview)
+  add_executable(preview_test_worker tests/desktop/preview_test_worker.cpp)
+  add_library(fileweaver_desktop_ui apps/desktop/preferences.cpp apps/desktop/preferences.hpp apps/desktop/preview_controller.cpp apps/desktop/preview_controller.hpp apps/desktop/preview_highlighter.cpp apps/desktop/preview_highlighter.hpp apps/desktop/directory_changes.cpp apps/desktop/directory_changes.hpp apps/desktop/watch_controller.cpp apps/desktop/watch_controller.hpp apps/desktop/file_open.cpp apps/desktop/file_open.hpp apps/desktop/global_hotkey.cpp apps/desktop/global_hotkey.hpp apps/desktop/arguments.cpp apps/desktop/arguments.hpp apps/desktop/search_controller.cpp
     apps/desktop/search_controller.hpp apps/desktop/search_window.cpp apps/desktop/search_window.hpp)
   set_target_properties(fileweaver_desktop_ui PROPERTIES AUTOMOC ON)
   target_include_directories(fileweaver_desktop_ui PUBLIC apps/desktop)
-  target_link_libraries(fileweaver_desktop_ui PUBLIC fileweaver_storage Qt6::Widgets PRIVATE Threads::Threads user32 shell32 ole32)
+  target_link_libraries(fileweaver_desktop_ui PUBLIC fileweaver_storage fileweaver_preview Qt6::Widgets PRIVATE Threads::Threads user32 shell32 ole32)
   qt_add_executable(fileweaver-desktop WIN32 apps/desktop/main.cpp)
   target_link_libraries(fileweaver-desktop PRIVATE fileweaver_desktop_ui)
   qt_add_executable(desktop_tests tests/desktop/search_window_test.cpp)
   set_target_properties(desktop_tests PROPERTIES AUTOMOC ON WIN32_EXECUTABLE FALSE)
   target_link_libraries(desktop_tests PRIVATE fileweaver_desktop_ui Qt6::Test)
-  foreach(desktop_target IN ITEMS fileweaver_desktop_ui fileweaver-desktop desktop_tests)
+  qt_add_executable(phase2_tests tests/desktop/phase2_test.cpp)
+  set_target_properties(phase2_tests PROPERTIES AUTOMOC ON WIN32_EXECUTABLE FALSE)
+  target_link_libraries(phase2_tests PRIVATE fileweaver_desktop_ui Qt6::Test)
+  add_dependencies(phase2_tests fileweaver-preview-worker preview_test_worker)
+  add_test(NAME phase2-desktop-contract COMMAND "${CMAKE_COMMAND}" "-DTEST_EXECUTABLE=$<TARGET_FILE:phase2_tests>" "-DRESULT_DIRECTORY=${CMAKE_BINARY_DIR}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/desktop/run_qt_test.cmake")
+  add_dependencies(fileweaver-desktop fileweaver-preview-worker)
+  add_dependencies(desktop_tests fileweaver-preview-worker preview_test_worker)
+  foreach(desktop_target IN ITEMS fileweaver_local_file fileweaver_preview fileweaver-preview-worker preview_test_worker fileweaver_desktop_ui fileweaver-desktop desktop_tests phase2_tests)
     target_compile_definitions(${desktop_target} PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     if(MSVC)
       target_compile_options(${desktop_target} PRIVATE /W4 /WX /permissive- /utf-8)
@@ -113,7 +133,7 @@ if(FILEWEAVER_BUILD_DESKTOP)
       target_compile_options(${desktop_target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
     endif()
   endforeach()
-  foreach(plugin_pair IN ITEMS "fileweaver-desktop,QWindowsIntegrationPlugin" "desktop_tests,QMinimalIntegrationPlugin")
+  foreach(plugin_pair IN ITEMS "fileweaver-desktop,QWindowsIntegrationPlugin" "desktop_tests,QMinimalIntegrationPlugin" "phase2_tests,QMinimalIntegrationPlugin")
     string(REPLACE "," ";" plugin_parts "${plugin_pair}")
     list(GET plugin_parts 0 executable_target)
     list(GET plugin_parts 1 plugin_target)
@@ -125,6 +145,13 @@ if(FILEWEAVER_BUILD_DESKTOP)
       COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:Qt6::${plugin_target}>"
         "$<TARGET_FILE_DIR:${executable_target}>/platforms" VERBATIM)
   endforeach()
+  if(NOT TARGET Qt6::QJpegPlugin)
+    message(FATAL_ERROR "PNG/JPEG preview requires the approved qtbase jpeg/png features")
+  endif()
+  add_custom_command(TARGET fileweaver-preview-worker POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:fileweaver-preview-worker>/imageformats"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:Qt6::QJpegPlugin>" "$<TARGET_FILE_DIR:fileweaver-preview-worker>/imageformats"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:libjpeg-turbo::jpeg>" "$<TARGET_FILE_DIR:fileweaver-preview-worker>" VERBATIM)
   if(TARGET Qt6::QModernWindowsStylePlugin)
     add_custom_command(TARGET fileweaver-desktop POST_BUILD
       COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:fileweaver-desktop>/styles"
@@ -135,7 +162,7 @@ if(FILEWEAVER_BUILD_DESKTOP)
     get_filename_component(compiler_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
     foreach(runtime IN ITEMS libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll)
       if(EXISTS "${compiler_bin}/${runtime}")
-        foreach(executable_target IN ITEMS fileweaver-desktop desktop_tests)
+        foreach(executable_target IN ITEMS fileweaver-desktop desktop_tests phase2_tests fileweaver-preview-worker)
           add_custom_command(TARGET ${executable_target} POST_BUILD COMMAND "${CMAKE_COMMAND}" -E
             copy_if_different "${compiler_bin}/${runtime}" "$<TARGET_FILE_DIR:${executable_target}>" VERBATIM)
         endforeach()
@@ -149,7 +176,7 @@ if(FILEWEAVER_BUILD_DESKTOP)
 endif()
 
 set(PROJECT_SOURCES tests/support/directory_link.hpp apps/cli/main.cpp apps/cli/output.hpp apps/cli/windows_io.hpp benchmarks/search/core_search.cpp benchmarks/search/process_memory.hpp src/database/initialize.cpp tests/integration/storage.cpp
-  src/core/utc_time.cpp include/fileweaver/core/utc_time.hpp src/core/fuzzy.cpp include/fileweaver/core/fuzzy.hpp include/fileweaver/core/watch_schedule.hpp
+  src/core/text.cpp include/fileweaver/core/text.hpp src/core/glob.cpp include/fileweaver/core/glob.hpp src/core/utc_time.cpp include/fileweaver/core/utc_time.hpp src/core/fuzzy.cpp include/fileweaver/core/fuzzy.hpp include/fileweaver/core/watch_schedule.hpp
   include/fileweaver/application/index.hpp
   include/fileweaver/application/inspect.hpp
   include/fileweaver/application/refresh.hpp
@@ -186,6 +213,8 @@ if(CLANG_TIDY)
     "${CMAKE_CURRENT_SOURCE_DIR}/src/database/initialize.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/core/utc_time.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/core/fuzzy.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/text.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/glob.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/filesystem/scan.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/storage.cpp" ${DESKTOP_TIDY_SOURCES} ${TIDY_PLATFORM_ARGS} --warnings-as-errors=* VERBATIM)
 else()

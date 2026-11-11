@@ -1,5 +1,6 @@
 #include "fileweaver/core/fuzzy.hpp"
 #include "fileweaver/core/storage_error.hpp"
+#include "fileweaver/core/text.hpp"
 #include <algorithm>
 #include <array>
 #include <limits>
@@ -11,63 +12,11 @@ void checkpoint(const std::stop_token &stop) {
         throw StorageError("Search cancelled", 1);
     }
 }
-struct DecodePolicy {
-    std::size_t limit;
-    int error_code;
-};
-std::u32string decode(std::string_view text, DecodePolicy policy) {
-    const auto [limit, error_code] = policy;
-    std::u32string result;
-    for (std::size_t i = 0; i < text.size();) {
-        const auto lead = static_cast<unsigned char>(text[i++]);
-        std::uint32_t value = lead;
-        std::size_t remaining = 0;
-        std::uint32_t minimum = 0;
-        if (lead >= 0xc2 && lead <= 0xdf) {
-            value = lead & 0x1fU;
-            remaining = 1;
-            minimum = 0x80;
-        } else if (lead >= 0xe0 && lead <= 0xef) {
-            value = lead & 0x0fU;
-            remaining = 2;
-            minimum = 0x800;
-        } else if (lead >= 0xf0 && lead <= 0xf4) {
-            value = lead & 0x07U;
-            remaining = 3;
-            minimum = 0x10000;
-        } else if (lead >= 0x80) {
-            throw StorageError("Fuzzy search requires valid UTF-8", error_code);
-        }
-        if (remaining > text.size() - i) {
-            throw StorageError("Fuzzy search requires valid UTF-8", error_code);
-        }
-        while (remaining > 0) {
-            --remaining;
-            const auto next = static_cast<unsigned char>(text[i++]);
-            if ((next & 0xc0U) != 0x80U) {
-                throw StorageError("Fuzzy search requires valid UTF-8", error_code);
-            }
-            value = (value << 6U) | (next & 0x3fU);
-        }
-        if (value < minimum || value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff) ||
-            value == 0) {
-            throw StorageError("Fuzzy search requires valid UTF-8 without NUL", error_code);
-        }
-        if (result.size() == limit) {
-            throw StorageError("Fuzzy text exceeds Unicode length limit", error_code);
-        }
-        if (value >= 'A' && value <= 'Z') {
-            value += 'a' - 'A';
-        }
-        result.push_back(static_cast<char32_t>(value));
-    }
-    return result;
-}
 bool space(char32_t value) { return value == U' ' || (value >= U'\t' && value <= U'\r'); }
 bool separator(char32_t value) {
     return value < 128 && !((value >= U'a' && value <= U'z') || (value >= U'0' && value <= U'9'));
 }
-std::vector<std::u32string_view> words(const std::u32string &name) {
+std::vector<std::u32string_view> words(std::u32string_view name) {
     std::vector<std::u32string_view> result;
     std::size_t begin = 0;
     for (std::size_t i = 0; i <= name.size(); ++i) {
@@ -179,9 +128,9 @@ std::size_t distance(std::u32string_view query, std::u32string_view word,
 }
 } // namespace
 FuzzyMatcher::FuzzyMatcher(std::string_view query, FuzzyWeights weights)
-    : query_(decode(query, {128, 2})), weights_(weights) {
-    for (const int weight :
-         {weights.exact, weights.prefix, weights.token, weights.subsequence, weights.typo}) {
+    : query_(decode_utf8(query, {128, 2, true})), weights_(weights) {
+    for (const int weight : {weights.exact, weights.prefix, weights.token, weights.subsequence,
+                             weights.typo, weights.path}) {
         if (weight < 0 || weight > 10000) {
             throw StorageError("Fuzzy weights require 0..10000", 2);
         }
@@ -200,27 +149,58 @@ FuzzyMatcher::FuzzyMatcher(std::string_view query, FuzzyWeights weights)
                            2);
     }
 }
-bool FuzzyMatcher::candidate(std::string_view text, const std::stop_token &stop) const {
+namespace {
+std::vector<std::u32string_view> pieces(const std::u32string &name, const std::u32string &path) {
+    std::vector<std::u32string_view> result{name};
+    std::size_t begin = 0;
+    for (std::size_t i = 0; i <= path.size(); ++i) {
+        if (i == path.size() || path[i] == U'/' || path[i] == U'\\') {
+            const auto part = std::u32string_view(path).substr(begin, i - begin);
+            if (!part.empty() && part != name) {
+                result.push_back(part);
+            }
+            begin = i + 1;
+        }
+    }
+    if (result.size() > 512) {
+        throw StorageError("Fuzzy path exceeds 512 components", 5);
+    }
+    return result;
+}
+} // namespace
+bool FuzzyMatcher::candidate(std::string_view text, const std::stop_token &stop,
+                             std::string_view path) const {
     checkpoint(stop);
-    const auto name = decode(text, {1024, 5});
-    const auto parts = words(name);
+    const auto name = decode_utf8(text, {1024, 5, true});
+    const auto parent = decode_utf8(path, {32760, 5, true});
+    const auto components = pieces(name, parent);
     for (const auto &token : tokens_) {
         checkpoint(stop);
-        if (subsequence({token, name})) {
-            continue;
+        bool accepted = false;
+        for (const auto component : components) {
+            if (subsequence({token, component})) {
+                accepted = true;
+                break;
+            }
+            const auto word_views = words(component);
+            if (std::any_of(word_views.begin(), word_views.end(),
+                            [&](auto word) { return possibleTypo(token, word); })) {
+                accepted = true;
+                break;
+            }
         }
-        if (std::none_of(parts.begin(), parts.end(),
-                         [&](auto word) { return possibleTypo(token, word); })) {
+        if (!accepted) {
             return false;
         }
     }
     return true;
 }
-std::optional<std::int64_t> FuzzyMatcher::score(std::string_view text,
-                                                const std::stop_token &stop) const {
+std::optional<std::int64_t> FuzzyMatcher::score(std::string_view text, const std::stop_token &stop,
+                                                std::string_view path) const {
     checkpoint(stop);
-    const auto name = decode(text, {1024, 5});
-    const auto parts = words(name);
+    const auto name = decode_utf8(text, {1024, 5, true});
+    const auto parent = decode_utf8(path, {32760, 5, true});
+    const auto components = pieces(name, parent);
     std::int64_t total = name == query_ ? weights_.exact : 0;
     if (name.starts_with(query_)) {
         total += weights_.prefix;
@@ -228,22 +208,29 @@ std::optional<std::int64_t> FuzzyMatcher::score(std::string_view text,
     for (const auto &token : tokens_) {
         checkpoint(stop);
         std::optional<std::int64_t> best;
-        const auto offer = [&](std::int64_t value) {
-            best = best ? std::max(*best, value) : value;
-        };
-        if (name.find(token) != std::u32string::npos) {
-            offer(weights_.token);
-        }
-        if (subsequence({token, name})) {
-            offer(weights_.subsequence);
-        }
-        for (auto word : parts) {
-            if (!possibleTypo(token, word)) {
-                continue;
+        for (std::size_t i = 0; i < components.size(); ++i) {
+            const auto component = components[i];
+            const auto offer = [&](std::int64_t value) {
+                if (i != 0) {
+                    value = std::min(value, static_cast<std::int64_t>(weights_.path));
+                }
+                best = best ? std::max(*best, value) : value;
+            };
+            if (component.find(token) != std::u32string_view::npos) {
+                offer(weights_.token);
             }
-            const auto edits = distance(token, word, stop);
-            if (edits > 0 && edits <= tolerance(token.size())) {
-                offer(static_cast<std::int64_t>(weights_.typo) - static_cast<std::int64_t>(edits));
+            if (subsequence({token, component})) {
+                offer(weights_.subsequence);
+            }
+            for (const auto word : words(component)) {
+                if (!possibleTypo(token, word)) {
+                    continue;
+                }
+                const auto edits = distance(token, word, stop);
+                if (edits > 0 && edits <= tolerance(token.size())) {
+                    offer(static_cast<std::int64_t>(weights_.typo) -
+                          static_cast<std::int64_t>(edits));
+                }
             }
         }
         if (!best) {

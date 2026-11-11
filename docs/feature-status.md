@@ -54,7 +54,10 @@ Further work is prioritized for Windows; release packaging is out of scope.
 | 2 | Confirmed Windows Explorer reveal of selected local files, all extensions | Tested |
 | 2 | Bounded fuzzy filename matching/ranking, configurable CLI and Windows UI | Tested |
 | 2 | Opt-in single-root Windows notifications and policy-preserving reconciliation | Tested |
-| 2 | Path matching, multi-root/CLI watch and safe preview | Planned |
+| 2 | Glob/literal path/fuzzy parent components and visual filters/sort | In Progress |
+| 2 | Opt-in isolated text/source/PNG/JPEG previews, bounded thumbnails | In Progress |
+| 2 | Escape hide with active hotkey and optional non-sensitive preferences | In Progress |
+| Future | Multi-root/CLI watch and PDF/GIF second preview batch | Planned |
 | 3 | Analysis, duplicates, organizer, rename, journal | Planned |
 | 4 | Project launcher, opt-in clipboard, activity | Planned |
 | 5 | Opt-in semantic search, backup and restore | Planned |

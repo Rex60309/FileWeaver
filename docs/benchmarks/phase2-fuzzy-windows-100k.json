@@ -1,0 +1,342 @@
+{
+  "created_at_utc": "2026-11-11T11:42:51.709529+00:00",
+  "hardware": {
+    "os": "Windows-11-10.0.26300-SP0",
+    "architecture": "AMD64",
+    "cpu": "13th Gen Intel(R) Core(TM) i7-13700KF",
+    "logical_cpus": 24,
+    "ram_bytes": 34104291328,
+    "driver_peak_rss_bytes": 35311616,
+    "cli_peak_rss_bytes": null
+  },
+  "build": {
+    "build_type": "Release",
+    "compiler_id": "GNU",
+    "compiler_version": "13.2.0",
+    "cxx_standard": 20,
+    "cmake_version": "3.29.2",
+    "system": "Windows",
+    "architecture": "AMD64"
+  },
+  "dataset": {
+    "rows": 100000,
+    "synthetic_metadata_only": true,
+    "target_rows": 3
+  },
+  "scope": "CLI startup, read-only SQLite query, candidate generation, ranking, JSON, memory observer overhead",
+  "storage": "unknown; not measured",
+  "cache_note": "No cache eviction. First run is not a controlled cold-cache measurement.",
+  "baseline": "Phase 2 filename-fuzzy regression baseline after shared UTF-8/path matching refactor; no speedup or latency-target claim",
+  "summaries": [
+    {
+      "query": "needle",
+      "p50_ms": 81.8281,
+      "p95_ms": 82.2447
+    },
+    {
+      "query": "nedle",
+      "p50_ms": 83.9897,
+      "p95_ms": 85.5956
+    },
+    {
+      "query": "img proc fin",
+      "p50_ms": 89.7753,
+      "p95_ms": 97.186
+    },
+    {
+      "query": "日本😀",
+      "p50_ms": 83.5113,
+      "p95_ms": 86.5703
+    }
+  ],
+  "measurements": [
+    {
+      "query": "needle",
+      "iteration": 0,
+      "cache": "uncontrolled_first",
+      "elapsed_ms": 83.8423,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11440128,
+        "error_code": null
+      }
+    },
+    {
+      "query": "needle",
+      "iteration": 1,
+      "cache": "warm_os_cache",
+      "elapsed_ms": 81.4419,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11448320,
+        "error_code": null
+      }
+    },
+    {
+      "query": "needle",
+      "iteration": 2,
+      "cache": "warm_os_cache",
+      "elapsed_ms": 80.7466,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11427840,
+        "error_code": null
+      }
+    },
+    {
+      "query": "needle",
+      "iteration": 3,
+      "cache": "warm_os_cache",
+      "elapsed_ms": 82.2447,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11427840,
+        "error_code": null
+      }
+    },
+    {
+      "query": "needle",
+      "iteration": 4,
+      "cache": "warm_os_cache",
+      "elapsed_ms": 81.8281,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11423744,
+        "error_code": null
+      }
+    },
+    {
+      "query": "needle",
+      "iteration": 5,
+      "cache": "warm_os_cache",
+      "elapsed_ms": 82.081,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11436032,
+        "error_code": null
+      }
+    },
+    {
+      "query": "nedle",
+      "iteration": 0,
+      "cache": "uncontrolled_first",
+      "elapsed_ms": 83.2439,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11427840,
+        "error_code": null
+      }
+    },
+    {
+      "query": "nedle",
+      "iteration": 1,
+      "cache": "warm_os_cache",
+      "elapsed_ms": 81.1248,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11431936,
+        "error_code": null
+      }
+    },
+    {
+      "query": "nedle",
+      "iteration": 2,
+      "cache": "warm_os_cache",
+      "elapsed_ms": 80.9522,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11436032,
+        "error_code": null
+      }
+    },
+    {
+      "query": "nedle",
+      "iteration": 3,
+      "cache": "warm_os_cache",
+      "elapsed_ms": 84.3391,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11444224,
+        "error_code": null
+      }
+    },
+    {
+      "query": "nedle",
+      "iteration": 4,
+      "cache": "warm_os_cache",
+      "elapsed_ms": 85.5956,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11440128,
+        "error_code": null
+      }
+    },
+    {
+      "query": "nedle",
+      "iteration": 5,
+      "cache": "warm_os_cache",
+      "elapsed_ms": 83.9897,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11427840,
+        "error_code": null
+      }
+    },
+    {
+      "query": "img proc fin",
+      "iteration": 0,
+      "cache": "uncontrolled_first",
+      "elapsed_ms": 87.4561,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11448320,
+        "error_code": null
+      }
+    },
+    {
+      "query": "img proc fin",
+      "iteration": 1,
+      "cache": "warm_os_cache",
+      "elapsed_ms": 90.6338,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11440128,
+        "error_code": null
+      }
+    },
+    {
+      "query": "img proc fin",
+      "iteration": 2,
+      "cache": "warm_os_cache",
+      "elapsed_ms": 97.186,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11452416,
+        "error_code": null
+      }
+    },
+    {
+      "query": "img proc fin",
+      "iteration": 3,
+      "cache": "warm_os_cache",
+      "elapsed_ms": 89.7753,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11444224,
+        "error_code": null
+      }
+    },
+    {
+      "query": "img proc fin",
+      "iteration": 4,
+      "cache": "warm_os_cache",
+      "elapsed_ms": 82.8235,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11440128,
+        "error_code": null
+      }
+    },
+    {
+      "query": "img proc fin",
+      "iteration": 5,
+      "cache": "warm_os_cache",
+      "elapsed_ms": 83.7858,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11444224,
+        "error_code": null
+      }
+    },
+    {
+      "query": "日本😀",
+      "iteration": 0,
+      "cache": "uncontrolled_first",
+      "elapsed_ms": 86.3244,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11476992,
+        "error_code": null
+      }
+    },
+    {
+      "query": "日本😀",
+      "iteration": 1,
+      "cache": "warm_os_cache",
+      "elapsed_ms": 82.8013,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11460608,
+        "error_code": null
+      }
+    },
+    {
+      "query": "日本😀",
+      "iteration": 2,
+      "cache": "warm_os_cache",
+      "elapsed_ms": 83.0564,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11460608,
+        "error_code": null
+      }
+    },
+    {
+      "query": "日本😀",
+      "iteration": 3,
+      "cache": "warm_os_cache",
+      "elapsed_ms": 83.5113,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11460608,
+        "error_code": null
+      }
+    },
+    {
+      "query": "日本😀",
+      "iteration": 4,
+      "cache": "warm_os_cache",
+      "elapsed_ms": 84.2572,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11485184,
+        "error_code": null
+      }
+    },
+    {
+      "query": "日本😀",
+      "iteration": 5,
+      "cache": "warm_os_cache",
+      "elapsed_ms": 86.5703,
+      "correct": true,
+      "memory": {
+        "status": "available",
+        "peak_bytes": 11476992,
+        "error_code": null
+      }
+    }
+  ]
+}

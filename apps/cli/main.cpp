@@ -79,10 +79,10 @@ int run_cli(int argc, char *argv[], bool json_requested) {
     std::size_t limit = 100;
     std::string sort = "name";
     bool descending = false;
-    search->add_option("query", query, "Literal filename query")->required();
+    search->add_option("query", query, "Search query (literal except glob mode)")->required();
     search->add_option("--database", database, "Initialized database path")->required();
-    search->add_option("--mode", mode, "exact, substring, prefix or fuzzy")
-        ->check(CLI::IsMember({"exact", "substring", "prefix", "fuzzy"}));
+    search->add_option("--mode", mode, "exact, substring, prefix, glob, path or fuzzy")
+        ->check(CLI::IsMember({"exact", "substring", "prefix", "fuzzy", "glob", "path"}));
     search->add_option("--limit", limit, "Maximum results (1..10000)")->check(CLI::Range(1, 10000));
     const auto *sort_option =
         search->add_option("--sort", sort, "name, size, modified; fuzzy defaults to relevance")
@@ -112,6 +112,12 @@ int run_cli(int argc, char *argv[], bool json_requested) {
     search
         ->add_option("--fuzzy-typo-weight", fuzzy.weights.typo,
                      "Fuzzy typo score before edit penalty (default 50)")
+        ->check(CLI::Range(0, 10000));
+    search->add_flag("--fuzzy-path", fuzzy.path_components,
+                     "Allow fuzzy tokens in parent path components");
+    search
+        ->add_option("--fuzzy-path-weight", fuzzy.weights.path,
+                     "Parent-component score cap (default 50)")
         ->check(CLI::Range(0, 10000));
     fileweaver::SearchFilters filters;
     std::string selected_extension;
@@ -237,7 +243,9 @@ int run_cli(int argc, char *argv[], bool json_requested) {
         }
         if (*search) {
             fileweaver::SearchRequest request{std::filesystem::path(utf8), query,
-                                              mode == "fuzzy"   ? fileweaver::SearchMode::fuzzy
+                                              mode == "glob"    ? fileweaver::SearchMode::glob
+                                              : mode == "path"  ? fileweaver::SearchMode::path
+                                              : mode == "fuzzy" ? fileweaver::SearchMode::fuzzy
                                               : mode == "exact" ? fileweaver::SearchMode::exact
                                               : mode == "prefix"
                                                   ? fileweaver::SearchMode::prefix
@@ -246,6 +254,9 @@ int run_cli(int argc, char *argv[], bool json_requested) {
             request.filters = filters;
             if (*extension_option) {
                 request.filters.extension = selected_extension;
+            }
+            if (fuzzy.path_components && mode != "fuzzy") {
+                throw fileweaver::StorageError("--fuzzy-path requires --mode fuzzy", 2);
             }
             request.fuzzy = fuzzy;
             request.sort = (sort == "relevance" || (mode == "fuzzy" && !*sort_option))

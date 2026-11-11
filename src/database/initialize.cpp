@@ -3,7 +3,9 @@
 #include "fileweaver/application/inspect.hpp"
 #include "fileweaver/application/refresh.hpp"
 #include "fileweaver/application/search.hpp"
+#include "fileweaver/core/glob.hpp"
 #include "fileweaver/core/storage_error.hpp"
+#include "fileweaver/core/text.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -931,7 +933,8 @@ std::vector<SearchResult> search_files(const SearchRequest &request, const std::
         request.query.find('\0') != std::string::npos || request.limit == 0 ||
         request.limit > 10000 ||
         (request.mode != SearchMode::exact && request.mode != SearchMode::substring &&
-         request.mode != SearchMode::prefix && request.mode != SearchMode::fuzzy)) {
+         request.mode != SearchMode::prefix && request.mode != SearchMode::fuzzy &&
+         request.mode != SearchMode::glob && request.mode != SearchMode::path)) {
         throw StorageError("Search requires a nonempty query up to 4096 bytes and limit 1..10000",
                            2);
     }
@@ -949,6 +952,13 @@ std::vector<SearchResult> search_files(const SearchRequest &request, const std::
             throw StorageError("Fuzzy candidate limit requires 1..10000", 2);
         }
         matcher.emplace(request.query, request.fuzzy.weights);
+    }
+    std::optional<GlobMatcher> glob;
+    if (request.mode == SearchMode::glob) {
+        glob.emplace(request.query);
+    }
+    if (request.mode == SearchMode::path) {
+        static_cast<void>(decode_utf8(request.query, {4096, 2}));
     }
     const auto &filters = request.filters;
     if (filters.modified_after && filters.modified_before &&
@@ -1026,11 +1036,13 @@ std::vector<SearchResult> search_files(const SearchRequest &request, const std::
     const std::string ordering =
         std::string("ORDER BY ") + primary + (request.descending ? " DESC," : " ASC,") +
         "name COLLATE BINARY ASC,normalized_path COLLATE BINARY ASC,root_id ASC,id ASC LIMIT ?2";
-    const char *predicate = fuzzy                               ? "?1 IS NOT NULL "
-                            : request.mode == SearchMode::exact ? "name=?1 "
-                            : request.mode == SearchMode::prefix
-                                ? "instr(lower(name),lower(?1))=1 "
-                                : "instr(lower(name),lower(?1))>0 ";
+    const char *predicate =
+        (fuzzy || glob) ? "?1 IS NOT NULL "
+        : request.mode == SearchMode::path
+            ? "instr(lower(replace(display_path,char(92),'/')),lower(replace(?1,char(92),'/')))>0 "
+        : request.mode == SearchMode::exact  ? "name=?1 "
+        : request.mode == SearchMode::prefix ? "instr(lower(name),lower(?1))=1 "
+                                             : "instr(lower(name),lower(?1))>0 ";
     const std::string sql =
         std::string(
             "SELECT id,root_id,display_path,name,size_bytes FROM files WHERE is_present=1 AND ") +
@@ -1042,7 +1054,7 @@ std::vector<SearchResult> search_files(const SearchRequest &request, const std::
         ordering;
     auto query = prepare(db.get(), sql.c_str());
     bind_text(query.get(), 1, request.query);
-    bind_integer(query.get(), 2, fuzzy ? -1 : static_cast<std::int64_t>(request.limit));
+    bind_integer(query.get(), 2, (fuzzy || glob) ? -1 : static_cast<std::int64_t>(request.limit));
     const auto bind_null = [&](int position) {
         if (sqlite3_bind_null(query.get(), position) != SQLITE_OK) {
             throw StorageError("Cannot bind optional search filter", 1);
@@ -1113,7 +1125,14 @@ std::vector<SearchResult> search_files(const SearchRequest &request, const std::
             throw StorageError("Invalid indexed metadata", 5);
         }
         auto name = text_column(3);
-        if (matcher && !matcher->candidate(name, stop)) {
+        std::string fuzzy_path;
+        if (matcher && request.fuzzy.path_components) {
+            fuzzy_path = text_column(2);
+        }
+        if (glob && !glob->matches(name, stop)) {
+            continue;
+        }
+        if (matcher && !matcher->candidate(name, stop, fuzzy_path)) {
             continue;
         }
         if (matcher && ++candidates > request.fuzzy.candidate_limit) {
@@ -1132,12 +1151,15 @@ std::vector<SearchResult> search_files(const SearchRequest &request, const std::
                             sqlite3_column_int64(query.get(), 1), std::move(path), std::move(name),
                             sqlite3_column_int64(query.get(), 4)};
         if (matcher) {
-            const auto score = matcher->score(result.name, stop);
+            const auto score = matcher->score(result.name, stop, fuzzy_path);
             if (score) {
                 ranked.emplace_back(*score, std::move(result));
             }
         } else {
             results.push_back(std::move(result));
+            if (glob && results.size() == request.limit) {
+                break;
+            }
         }
     }
     if (matcher) {
@@ -1153,6 +1175,9 @@ std::vector<SearchResult> search_files(const SearchRequest &request, const std::
     }
     if (stop.stop_requested()) {
         throw StorageError("Search cancelled", 1);
+    }
+    if (sqlite3_reset(query.get()) != SQLITE_OK) {
+        throw StorageError("Cannot finish search cursor", 1);
     }
     execute(db.get(), "COMMIT");
     return results;

@@ -10,7 +10,7 @@
 #include <vector>
 
 namespace fileweaver {
-enum class SearchMode : std::uint8_t { exact, substring, prefix, fuzzy };
+enum class SearchMode : std::uint8_t { exact, substring, prefix, fuzzy, glob, path };
 enum class SearchSort : std::uint8_t { name, size, modified, relevance };
 struct SearchFilters {
     std::optional<std::string> extension;

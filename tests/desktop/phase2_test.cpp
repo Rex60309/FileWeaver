@@ -1,0 +1,442 @@
+#include "preferences.hpp"
+#include "preview.hpp"
+#include "preview_controller.hpp"
+#include "preview_highlighter.hpp"
+#include "search_window.hpp"
+#include <QApplication>
+#include <QBuffer>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QCoreApplication>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QImage>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QKeySequenceEdit>
+#include <QLabel>
+#include <QLineEdit>
+#include <QPlainTextEdit>
+#include <QPushButton>
+#include <QSemaphore>
+#include <QSignalSpy>
+#include <QSpinBox>
+#include <QTemporaryDir>
+#include <QTest>
+#include <QTextBlock>
+#include <QTextLayout>
+#include <QTreeView>
+#include <atomic>
+#include <fstream>
+#include <mutex>
+#include <thread>
+using namespace fileweaver::desktop;
+namespace {
+template <class T> T *control(SearchWindow &window, const char *name) {
+    auto *value = window.findChild<T *>(QString::fromLatin1(name));
+    if (!value) {
+        throw std::runtime_error("Missing phase2 control");
+    }
+    return value;
+}
+QString native(const QString &path) { return QDir::toNativeSeparators(path); }
+void write(const QString &path, const QByteArray &bytes) {
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size()) {
+        throw std::runtime_error("Cannot write synthetic fixture");
+    }
+}
+PreviewProcess process(const char *name = "fileweaver-preview-worker.exe") {
+    return {std::filesystem::path(
+        (QCoreApplication::applicationDirPath() + u'/' + QString::fromLatin1(name))
+            .toStdWString())};
+}
+std::vector<fileweaver::SearchResult> result() {
+    return {{1, 1, "C:/synthetic/report.txt", "report.txt", 3}};
+}
+} // namespace
+class Phase2Tests final : public QObject {
+    Q_OBJECT
+  private slots:
+    void defaultFontMatchesDisplayedPreference() {
+        SearchWindow window;
+        QCOMPARE(window.font().pointSize(),
+                 control<QSpinBox>(window, "interfaceFontSize")->value());
+        QCOMPARE(control<QPlainTextEdit>(window, "previewText")->font().pointSize(),
+                 window.font().pointSize());
+    }
+    void previewTextLimitsEncodingAndNoExecution() {
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+        const auto path = native(temp.filePath(QStringLiteral("日本語😀.cpp")));
+        const QByteArray source = "int main() { return 0; } // fixture";
+        write(path, source);
+        auto reply = runPreview({path, {}}, {}, process());
+        QVERIFY2(reply.ok, qPrintable(reply.message));
+        QCOMPARE(reply.text, QString::fromUtf8(source));
+        QFile unchanged(path);
+        QVERIFY(unchanged.open(QIODevice::ReadOnly));
+        QCOMPARE(unchanged.readAll(), source);
+        unchanged.close();
+        const auto large = native(temp.filePath(QStringLiteral("large.txt")));
+        write(large, QByteArray(100000, 'a'));
+        reply = runPreview({large, {}}, {}, process());
+        QVERIFY(reply.ok);
+        QVERIFY(reply.truncated);
+        QCOMPARE(reply.text.size(), qsizetype{65536});
+        const auto lines = native(temp.filePath(QStringLiteral("lines.txt")));
+        write(lines, QByteArray("first\n") + QByteArray(5000, '\n'));
+        reply = runPreview({lines, {}}, {}, process());
+        QVERIFY(reply.ok);
+        QVERIFY(reply.truncated);
+        QVERIFY(reply.text.startsWith(QStringLiteral("first")));
+        QVERIFY(reply.text.count(u'\n') < 2000);
+        const auto utf16 = native(temp.filePath(QStringLiteral("utf16.txt")));
+        write(utf16, QByteArray::fromHex("fffee5652c67"));
+        reply = runPreview({utf16, {}}, {}, process());
+        QVERIFY(reply.ok);
+        QCOMPARE(reply.text, QStringLiteral("日本"));
+        const auto binary = native(temp.filePath(QStringLiteral("binary.txt")));
+        write(binary, QByteArray("a\0b", 3));
+        QVERIFY(!runPreview({binary, {}}, {}, process()).ok);
+        const auto invalid = native(temp.filePath(QStringLiteral("invalid.txt")));
+        write(invalid, QByteArray::fromHex("fffffe"));
+        QVERIFY(!runPreview({invalid, {}}, {}, process()).ok);
+        const auto script = native(temp.filePath(QStringLiteral("untrusted.ps1")));
+        write(script, "Remove-Item anything");
+        reply = runPreview({script, {}}, {}, process());
+        QVERIFY(reply.ok);
+        QVERIFY(reply.text.contains(QStringLiteral("Remove-Item")));
+        const auto unsupported = native(temp.filePath(QStringLiteral("unsupported.pdf")));
+        write(unsupported, "%PDF synthetic");
+        QVERIFY(!runPreview({unsupported, {}}, {}, process()).ok);
+        QVERIFY(
+            !runPreview({native(temp.filePath(QStringLiteral("missing.txt"))), {}}, {}, process())
+                 .ok);
+        std::stop_source stopped;
+        stopped.request_stop();
+        QVERIFY(!runPreview({path, {}}, stopped.get_token(), process()).ok);
+    }
+    void previewImagesCacheChecksumAndCorruption() {
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+        const auto png = native(temp.filePath(QStringLiteral("picture.png")));
+        QImage image(16, 8, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        QByteArray red_bytes;
+        QBuffer red_buffer(&red_bytes);
+        QVERIFY(red_buffer.open(QIODevice::WriteOnly));
+        QVERIFY(image.save(&red_buffer, "PNG"));
+        image.fill(Qt::blue);
+        QByteArray blue_bytes;
+        QBuffer blue_buffer(&blue_bytes);
+        QVERIFY(blue_buffer.open(QIODevice::WriteOnly));
+        QVERIFY(image.save(&blue_buffer, "PNG"));
+        const auto equal_size = std::max(red_bytes.size(), blue_bytes.size());
+        red_bytes.append(QByteArray(equal_size - red_bytes.size(), '\0'));
+        blue_bytes.append(QByteArray(equal_size - blue_bytes.size(), '\0'));
+        write(png, red_bytes);
+        auto reply = runPreview({png, {}}, {}, process());
+        QVERIFY2(reply.ok, qPrintable(reply.message));
+        QVERIFY(!reply.image.isNull());
+        QCOMPARE(reply.image.pixelColor(0, 0), QColor(Qt::red));
+        const auto hash = reply.hash;
+        reply = runPreview({png, hash}, {}, process());
+        QVERIFY(reply.ok);
+        QVERIFY(reply.cached);
+        const auto old_size = QFileInfo(png).size();
+        const auto file = std::filesystem::path(png.toStdWString());
+        const auto old_time = std::filesystem::last_write_time(file);
+        image.fill(Qt::blue);
+        write(png, blue_bytes);
+        QCOMPARE(QFileInfo(png).size(), old_size);
+        std::filesystem::last_write_time(file, old_time);
+        reply = runPreview({png, hash}, {}, process());
+        QVERIFY(reply.ok);
+        QVERIFY(!reply.cached);
+        QVERIFY(reply.hash != hash);
+        QCOMPARE(reply.image.pixelColor(0, 0), QColor(Qt::blue));
+        const auto jpeg = native(temp.filePath(QStringLiteral("picture.jpg")));
+        QVERIFY(image.save(jpeg, "JPEG"));
+        reply = runPreview({jpeg, {}}, {}, process());
+        QVERIFY2(reply.ok, qPrintable(reply.message));
+        QVERIFY(!reply.image.isNull());
+        const auto corrupt = native(temp.filePath(QStringLiteral("corrupt.png")));
+        write(corrupt, "not an image");
+        QVERIFY(!runPreview({corrupt, {}}, {}, process()).ok);
+        const auto giant = native(temp.filePath(QStringLiteral("giant.png")));
+        write(giant, QByteArray(8 * 1024 * 1024 + 1, 'x'));
+        QVERIFY(!runPreview({giant, {}}, {}, process()).ok);
+        const auto pixels = native(temp.filePath(QStringLiteral("pixels.png")));
+        QImage huge(8193, 1, QImage::Format_RGB32);
+        huge.fill(Qt::red);
+        QVERIFY(huge.save(pixels, "PNG"));
+        QVERIFY(!runPreview({pixels, {}}, {}, process()).ok);
+        const auto thin = native(temp.filePath(QStringLiteral("thin.png")));
+        QImage line(4096, 1, QImage::Format_RGB32);
+        line.fill(Qt::green);
+        QVERIFY(line.save(thin, "PNG"));
+        reply = runPreview({thin, {}}, {}, process());
+        QVERIFY(reply.ok);
+        QCOMPARE(reply.image.height(), 1);
+    }
+    void previewProcessProtocolTimeoutAndCancellation() {
+        const auto worker = process("preview_test_worker.exe");
+        auto reply = runPreview({QStringLiteral("C:\\synthetic\\normal.txt"), {}}, {}, worker);
+        QVERIFY2(reply.ok, qPrintable(reply.message));
+        QVERIFY(!runPreview({QStringLiteral("C:\\synthetic\\malformed.txt"), {}}, {}, worker).ok);
+        QVERIFY(!runPreview({QStringLiteral("C:\\synthetic\\oversize.txt"), {}}, {}, worker).ok);
+        QVERIFY(!runPreview({QStringLiteral("C:\\synthetic\\crash.txt"), {}}, {}, worker).ok);
+        auto fast = worker;
+        std::int64_t tick = 0;
+        fast.now = [&] {
+            return std::chrono::steady_clock::time_point(std::chrono::seconds(++tick));
+        };
+        reply = runPreview({QStringLiteral("C:\\synthetic\\slow.txt"), {}}, {}, fast);
+        QVERIFY(!reply.ok);
+        QVERIFY(reply.message.contains(QStringLiteral("5 秒")));
+        QSemaphore entered;
+        std::stop_source cancel;
+        auto slow = worker;
+        slow.now = [&] {
+            entered.release();
+            return std::chrono::steady_clock::now();
+        };
+        std::jthread task([&] {
+            reply = runPreview({QStringLiteral("C:\\synthetic\\slow.txt"), {}}, cancel.get_token(),
+                               slow);
+        });
+        QTRY_VERIFY(entered.available() > 0);
+        cancel.request_stop();
+        task.join();
+        QVERIFY(!reply.ok);
+        QVERIFY(reply.message.contains(QStringLiteral("取消")));
+        QVERIFY(!parsePreview("{\"ok\":true,\"kind\":\"image\",\"width\":99999}").ok);
+        QVERIFY(!parsePreview(QByteArray(512 * 1024 + 1, 'x')).ok);
+    }
+    void previewLatestRequestAndClearInvalidateCache() {
+        std::atomic<int> calls = 0;
+        QString last_hash;
+        PreviewController reader([&](const auto &request, const auto &) {
+            last_hash = request.cached_hash;
+            ++calls;
+            PreviewReply value;
+            value.ok = true;
+            value.hash = QString(64, u'a');
+            value.image = QImage(2, 2, QImage::Format_RGBA8888);
+            value.image.fill(Qt::red);
+            return value;
+        });
+        QSignalSpy completed(&reader, &PreviewController::completed);
+        reader.submit(QStringLiteral("C:\\one.png"));
+        QTRY_COMPARE(completed.count(), 1);
+        QVERIFY(last_hash.isEmpty());
+        reader.submit(QStringLiteral("C:\\one.png"));
+        QTRY_COMPARE(completed.count(), 2);
+        QVERIFY(!last_hash.isEmpty());
+        reader.clear();
+        reader.submit(QStringLiteral("C:\\one.png"));
+        QTRY_COMPARE(completed.count(), 3);
+        QVERIFY(last_hash.isEmpty());
+        QCOMPARE(calls.load(), 3);
+        std::atomic<bool> cancelled = false;
+        std::atomic<bool> entered = false;
+        PreviewController staged([&](const auto &request, const auto &stop) {
+            if (request.path.contains(QStringLiteral("old"))) {
+                entered = true;
+                std::mutex mutex;
+                std::condition_variable_any ready;
+                std::unique_lock lock(mutex);
+                ready.wait(lock, stop, [] { return false; });
+                cancelled = true;
+            }
+            PreviewReply value;
+            value.ok = true;
+            value.text = request.path;
+            return value;
+        });
+        QSignalSpy replies(&staged, &PreviewController::completed);
+        staged.submit(QStringLiteral("old"));
+        QTRY_VERIFY(entered.load());
+        staged.submit(QStringLiteral("new"));
+        QTRY_COMPARE(replies.count(), 1);
+        QVERIFY(cancelled.load());
+        QCOMPARE(qvariant_cast<PreviewReply>(replies.at(0).at(0)).text, QStringLiteral("new"));
+    }
+    void preferencesAreBoundedOptionalAndExcludeActivation() {
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+        const auto path = temp.filePath(QStringLiteral("preferences.json"));
+        QVERIFY(readPreferences(path).ok);
+        QVERIFY(!QFile::exists(path));
+        Preferences value;
+        value.enabled = true;
+        value.fuzzy.weights.path = 77;
+        value.hotkey = QStringLiteral("Ctrl+Shift+Space");
+        value.font = 14;
+        value.mode = 6;
+        QVERIFY(writePreferences(path, value).ok);
+        auto loaded = readPreferences(path);
+        QVERIFY(loaded.ok);
+        QCOMPARE(loaded.value.fuzzy.weights.path, 77);
+        QCOMPARE(loaded.value.font, 14);
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto bytes = file.readAll();
+        file.close();
+        QVERIFY(!bytes.contains("database"));
+        QVERIFY(!bytes.contains("preview"));
+        QVERIFY(!bytes.contains("watch"));
+        QVERIFY(!bytes.contains("query"));
+        value.enabled = false;
+        QVERIFY(writePreferences(path, value).ok);
+        loaded = readPreferences(path);
+        QVERIFY(loaded.ok);
+        QVERIFY(!loaded.value.enabled);
+        write(path, "{invalid");
+        QVERIFY(!readPreferences(path).ok);
+        write(path, QByteArray(4097, 'x'));
+        QVERIFY(!readPreferences(path).ok);
+        value.enabled = true;
+        value.font = 100;
+        QVERIFY(!writePreferences(path, value).ok);
+        value.font = 12;
+        {
+            PreferencesController writer;
+            writer.save(path, value);
+        }
+        QVERIFY(readPreferences(path).ok);
+        QCOMPARE(readPreferences(path).value.font, 12);
+        QVERIFY(!writePreferences(temp.path(), value).ok);
+    }
+    void filtersModesAndPreferenceOptInUseSharedRequest() {
+        std::mutex mutex;
+        fileweaver::SearchRequest last;
+        std::atomic<int> calls = 0;
+        SearchWindow window([&](const auto &request, const auto &) {
+            const std::lock_guard lock(mutex);
+            last = request;
+            ++calls;
+            return result();
+        });
+        window.show();
+        window.setDatabase(QStringLiteral("C:/synthetic/index.sqlite"));
+        control<QComboBox>(window, "mode")->setCurrentIndex(6);
+        control<QLineEdit>(window, "query")->setText(QStringLiteral("img proc fin"));
+        QTRY_VERIFY(calls.load() > 0);
+        {
+            const std::lock_guard lock(mutex);
+            QVERIFY(last.mode == fileweaver::SearchMode::fuzzy);
+            QVERIFY(last.fuzzy.path_components);
+        }
+        QTest::mouseClick(control<QPushButton>(window, "filterSettingsButton"), Qt::LeftButton);
+        auto *dialog = window.findChild<QDialog *>(QStringLiteral("filterSettings"));
+        QVERIFY(dialog);
+        dialog->findChild<QLineEdit *>(QStringLiteral("filterValue0"))
+            ->setText(QStringLiteral("5"));
+        dialog->findChild<QLineEdit *>(QStringLiteral("filterValue1"))
+            ->setText(QStringLiteral("99"));
+        dialog->findChild<QLineEdit *>(QStringLiteral("filterValue2"))
+            ->setText(QStringLiteral("C:\\synthetic"));
+        dialog->findChild<QCheckBox *>(QStringLiteral("filterExtensionEnabled"))->setChecked(true);
+        dialog->findChild<QLineEdit *>(QStringLiteral("filterValue5"))
+            ->setText(QStringLiteral("txt"));
+        dialog->findChild<QSpinBox *>(QStringLiteral("filterLimit"))->setValue(12);
+        auto *buttons = dialog->findChild<QDialogButtonBox *>();
+        QVERIFY(buttons);
+        const auto previous = calls.load();
+        QTest::mouseClick(buttons->button(QDialogButtonBox::Ok), Qt::LeftButton);
+        QTRY_VERIFY(calls.load() > previous);
+        {
+            const std::lock_guard lock(mutex);
+            QCOMPARE(last.limit, std::size_t{12});
+            QCOMPARE(last.filters.minimum_size, std::optional<std::int64_t>{5});
+            QCOMPARE(last.filters.extension, std::optional<std::string>{"txt"});
+        }
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+        const auto path = temp.filePath(QStringLiteral("prefs.json"));
+        window.loadPreferences(path);
+        auto *remember = control<QCheckBox>(window, "rememberPreferences");
+        QTRY_VERIFY(remember->isEnabled());
+        QVERIFY(!QFile::exists(path));
+        QTest::mouseClick(remember, Qt::LeftButton);
+        QTRY_VERIFY(QFile::exists(path));
+        QTRY_VERIFY(readPreferences(path).ok);
+        control<QSpinBox>(window, "interfaceFontSize")->setValue(15);
+        QTRY_COMPARE(readPreferences(path).value.font, 15);
+        SearchWindow restored([](const auto &, const auto &) { return result(); });
+        restored.loadPreferences(path);
+        restored.show();
+        QTRY_COMPARE(control<QSpinBox>(restored, "interfaceFontSize")->value(), 15);
+        QVERIFY(!control<QCheckBox>(restored, "hotkeyEnabled")->isChecked());
+        QVERIFY(!control<QCheckBox>(restored, "previewEnabled")->isChecked());
+        QVERIFY(!control<QPushButton>(restored, "watchStart")->isEnabled());
+    }
+    void escapeHidesOnlyWithEnabledHotkeyAndXStops() {
+        HotkeyApi api{[](const auto &) { return 0UL; }, [](int) { return 0UL; }};
+        SearchWindow window([](const auto &, const auto &) { return result(); }, nullptr, api);
+        window.show();
+        window.activateWindow();
+        QTest::mouseClick(control<QCheckBox>(window, "hotkeyEnabled"), Qt::LeftButton);
+        QVERIFY(control<QCheckBox>(window, "hotkeyEnabled")->isChecked());
+        QTest::keyClick(&window, Qt::Key_Escape);
+        QTRY_VERIFY(!window.isVisible());
+        QVERIFY(control<QCheckBox>(window, "hotkeyEnabled")->isChecked());
+        window.show();
+        window.close();
+        QVERIFY(!control<QCheckBox>(window, "hotkeyEnabled")->isChecked());
+    }
+    void windowPreviewRequiresOptInAndClearsOnIndexChange() {
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+        const auto path = native(temp.filePath(QStringLiteral("preview.cpp")));
+        write(path, "int synthetic = 42;");
+        SearchWindow window([path](const auto &, const auto &) {
+            return std::vector<fileweaver::SearchResult>{
+                {1, 1, path.toUtf8().toStdString(), "preview.cpp", 19}};
+        });
+        window.show();
+        window.setDatabase(QStringLiteral("C:/synthetic/one.sqlite"));
+        control<QLineEdit>(window, "query")->setText(QStringLiteral("preview"));
+        auto *view = control<QTreeView>(window, "results");
+        QTRY_COMPARE(view->model()->rowCount(), 1);
+        auto *enabled = control<QCheckBox>(window, "previewEnabled");
+        auto *text = control<QPlainTextEdit>(window, "previewText");
+        QVERIFY(!enabled->isChecked());
+        QVERIFY(text->toPlainText().isEmpty());
+        enabled->setChecked(true);
+        QTRY_COMPARE(text->toPlainText(), QStringLiteral("int synthetic = 42;"));
+        QTest::mouseClick(control<QPushButton>(window, "previewClear"), Qt::LeftButton);
+        QVERIFY(text->toPlainText().isEmpty());
+        enabled->setChecked(false);
+        enabled->setChecked(true);
+        QTRY_VERIFY(!text->toPlainText().isEmpty());
+        window.setDatabase(QStringLiteral("C:/synthetic/two.sqlite"));
+        QVERIFY(text->toPlainText().isEmpty());
+        enabled->setChecked(false);
+        window.close();
+    }
+    void syntaxHighlightingDoesNotInterpretText() {
+        QPlainTextEdit editor;
+        PreviewHighlighter highlighter(editor.document());
+        editor.setPlainText(QStringLiteral("int main() { return 1; }\n<script>anything</script>"));
+        highlighter.rehighlight();
+        QVERIFY(!editor.document()->firstBlock().layout()->formats().isEmpty());
+        QVERIFY(editor.toPlainText().contains(QStringLiteral("<script>")));
+    }
+};
+int main(int argc, char **argv) {
+    qputenv("QT_QPA_PLATFORM", "minimal");
+    QApplication app(argc, argv);
+    QApplication::setQuitOnLastWindowClosed(false);
+    if (QApplication::platformName() != QStringLiteral("minimal")) {
+        return 2;
+    }
+    Phase2Tests tests;
+    return QTest::qExec(&tests, QApplication::arguments());
+}
+#include "phase2_test.moc"
