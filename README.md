@@ -797,6 +797,27 @@ schema v3 升級、設定保存與 refresh 的結果見 [更新驗證紀錄](doc
 roots／status 唯讀檢查的結果見 [檢查驗證紀錄](docs/inspection-verification.md)。
 開發用 benchmark 工具與煙霧測試見 [benchmark 驗證紀錄](docs/benchmark-verification.md)。
 
+## 專案資料夾與空間管理
+
+日常使用請開啟 `build/desktop-release/fileweaver-desktop.exe`。索引資料庫與來源檔案分開保存；目前既有索引位於 `build/my-index`，清理建置產物時需保留該目錄及資料庫 sidecar 檔案。
+
+| 位置 | 用途與保留方式 |
+| --- | --- |
+| `build/desktop-release`、`build/release` | 目前可用的視窗與 CLI，以及執行所需 DLL |
+| `build/desktop-debug`、`build/debug` | 標準 Debug 建置與測試；後續優先重用這些目錄 |
+| `build/my-index` | 使用者索引，保留；不要把整個 build 當成可直接刪除的暫存 |
+| `build/dependencies`、`build/desktop-dependencies` | 已安裝的開發相依套件 |
+| `build/tools` | 編譯／分析工具與下載快取；保留以利後續重建 |
+| `build/benchmarks`、`build/validation` 與驗證紀錄 | 保留基準及驗收證據 |
+
+2026-11-12 已清除舊 GIF／Phase 2／PDF 驗證建置、一次性來源副本，以及 vcpkg 的 `buildtrees`／`packages` 編譯暫存。這些暫存可由後續建置重建，不影響已安裝的套件或目前執行版本。專案 build 的檔案邏輯大小由約 **18.82 GiB 降至 4.85 GiB**，移除約 **13.97 GiB**；這不是保證相同數量的實體磁碟空間回收量。
+
+`build/pdf-debug` 尚有約 **0.94 GiB** 舊測試程式／DLL 被 Windows 鎖住，已移除其中可刪除的檔案並保留鎖定項目；它已不是可用的建置目錄。待 Windows 釋放占用（可能需重新啟動 Windows）後，才可刪除這個殘留目錄。不要因此刪除其他保留目錄或更改檔案權限。
+
+本次清理清單、逐項結果與容量核對保留在本機 `build/cleanup-plan.json`、`build/cleanup-journal.jsonl`、`build/cleanup-result.json`，不納入 Git。索引 SHA-256 核對未變，唯讀狀態查詢及桌面啟動說明正常；標準 Debug／Release 在清理前完整測試各 15/15 通過。清理後兩種組態再次建置成功，Release 的 BMP／PDF／隱藏清除集中測試亦通過（5 passed、0 failed/skipped，含初始化與結束）。
+
+本次使用標準命令 `cmake --build --preset desktop-debug --parallel 4`、`cmake --build --preset desktop-release --parallel 4`、`ctest --preset desktop-debug --output-on-failure`、`ctest --preset desktop-release --output-on-failure`。清理後另以 `fileweaver.exe status --database <既有索引> --json` 與桌面 `--help` 檢查，以及 Qt Test 的 `bmpStaticPreviewLimitsAndCache`、`pdfAspectRatioAndGeometryBounds`、`pdfWindowOptInAndVisibilityLifecycle` 驗證保留版本。不新增功能或改動程式碼，既有產品格式／lint／CI 驗收仍對應相同原始碼。
+
 ## Build and verify
 
 Requirements: CMake 3.25+, Ninja, a working C++20 compiler, clang-format, clang-tidy,
