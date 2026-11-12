@@ -78,3 +78,9 @@ Further work is prioritized for Windows; release packaging is out of scope.
 | 3 | Analysis, duplicates, organizer, rename, journal | Planned |
 | 4 | Project launcher, opt-in clipboard, activity | Planned |
 | 5 | Opt-in semantic search, backup and restore | Planned |
+
+## Documentation maintenance
+
+Concise Traditional Chinese/English READMEs and generated-file ignore rules were
+checked on 2026-11-12. [Repository audit](repository-hygiene.md) records 46 ignored
+and 17 retained path cases, link validation and the unchanged application baseline.
