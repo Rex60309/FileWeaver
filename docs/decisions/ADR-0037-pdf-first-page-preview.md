@@ -1,6 +1,6 @@
 # ADR-0037: Opt-in PDF first-page preview with Poppler
 Date: 2026-11-12
-Status: Accepted by explicit user confirmation; local gates passed, hosted verification pending.
+Status: Accepted by explicit user confirmation; local and hosted Windows gates passed.
 
 ## Context and authorization
 The user approved Windows PDF first-page static previews using pinned Poppler

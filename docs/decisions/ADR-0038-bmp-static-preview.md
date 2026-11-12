@@ -1,7 +1,7 @@
 # ADR-0038: Opt-in Windows BMP static preview
 
 Date: 2026-11-12
-Status: Accepted by explicit user confirmation; all local gates passed; hosted verification pending.
+Status: Accepted by explicit user confirmation; all local and hosted Windows gates passed.
 
 ## Context and alternatives
 

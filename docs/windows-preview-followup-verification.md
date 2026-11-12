@@ -1,7 +1,7 @@
 # Windows Phase 2 preview follow-up verification
 
 Date: 2026-11-12 (Asia/Taipei).
-Status: all local gates passed; hosted MSVC/CI acceptance pending.
+Status: all local and hosted gates passed for the explicitly authorized Windows slice.
 
 ## Authorized scope
 
@@ -130,3 +130,38 @@ git -c core.autocrlf=false apply --check --directory=build/poppler-26.11.0 build
 
 The initial failure is not waived. A corrected fresh CI build is required for
 MSVC acceptance. No application tests or warnings were disabled to repair it.
+
+
+## Final hosted acceptance
+
+Verified source: `e2e4cb39e9a2b41fd32c3e78db65eec13eff24c1` on
+`feat/windows-preview-followup`. All four jobs succeeded in
+[quality run 43157108623](https://github.com/Rex60309/FileWeaver/actions/runs/43157108623):
+
+| Job | ID | Observed result |
+| --- | --- | --- |
+| Windows core | 130979479780 | Debug/Release 13/13 each |
+| Ubuntu core | 130979479680 | Success (existing portable-core coverage, no new Linux feature) |
+| Analysis | 130979479489 | Format/lint and portable-core ASan/UBSan 13/13 |
+| Windows desktop | 130979479794 | MSVC Debug/Release 15/15 each |
+
+MSVC 19.44.35229.0 desktop logs show both Poppler patches applied at
+05:00:28 UTC; pinned Poppler 26.11.0 built successfully. Dependency installation
+finished at 06:12:39 UTC. Desktop Debug CTest passed 15/15 at 06:15:35 UTC and
+Release 15/15 at 06:18:57 UTC, 2026-11-12 (Asia/Taipei afternoon). Qt test wrappers
+require an actual report with no failures/skips; a successful process launch
+alone is insufficient. Local Phase2Tests reported 17 passed and desktop interaction
+23 passed. No PDF/Qt sanitizer coverage or performance gain is claimed.
+
+The old source-f54dec8 run 43096237771 is superseded by this verified source.
+An attempt to cancel that obsolete queued run returned HTTP 409 (the API said it
+had not been queued despite its queried queued state); no cancellation succeeded
+and it is not acceptance evidence. The failed first attempt 43155314316 remains
+recorded above; its failure was fixed, not skipped.
+
+These results complete the selected BMP/PDF integration follow-up. More preview
+formats, PDF interaction/navigation, multiple simultaneous watched roots, later
+phases and release packages remain outside this slice; Linux development is
+still deferred. No real-user file mutation, schema or runtime network changes.
+A subsequent documentation-only skip-ci commit records these results without
+changing the source, tests, attributes, dependencies or workflow verified here.

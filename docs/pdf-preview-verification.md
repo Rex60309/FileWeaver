@@ -1,7 +1,6 @@
 # Windows PDF first-page preview verification
 
-Date: 2026-11-12 (Asia/Taipei). Status: local implementation and gates passed; hosted validation pending,
-no final PDF acceptance or release claim. The user authorized pinned Poppler, dependency
+Date: 2026-11-12 (Asia/Taipei). Status: local and hosted Windows gates passed; no formal release. The user authorized pinned Poppler, dependency
 downloads and a static first-page preview. ADR-0037 records the design and limits.
 
 ## Scope
@@ -134,3 +133,18 @@ The local integration patches also had blank context-line trailing spaces
 removed for git diff --check. Both still passed git apply --check against the
 same extracted official archive; their applied source changes are identical.
 No generated binaries, source PDFs, databases or download caches were committed.
+
+
+## Acceptance closure after Windows preview follow-up
+
+The queued original-source attempt above is a historical checkpoint, not the
+current status. PDF acceptance completed on 2026-11-12 using source
+`e2e4cb39e9a2b41fd32c3e78db65eec13eff24c1`, which also adds BMP and fixes generic
+preview clearing on hide. [Run 43157108623](https://github.com/Rex60309/FileWeaver/actions/runs/43157108623)
+passed all four jobs; MSVC desktop Debug/Release each passed 15/15. The updated
+[follow-up ledger](windows-preview-followup-verification.md) records job IDs,
+actual test timestamps, the fixed Windows patch-checkout regression and limits.
+Local GCC Debug/Release also passed 15/15, format/lint passed, with new PDF
+aspect-ratio/geometry and real-window opt-in/hide/fresh-content tests. FileWeaver
+application targets remain C++20; pinned Poppler built successfully with both
+configured compilers. No release package or PDF/Qt sanitizer claim.
