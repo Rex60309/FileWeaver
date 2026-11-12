@@ -71,3 +71,10 @@ Poppler C++ headers must compile under the project's existing C++20 flags and
 both configured compilers. Do not raise FileWeaver's language standard or weaken
 checks to accommodate the dependency. This dependency build detail is recorded
 separately from the application stack and is subject to actual build evidence.
+
+
+Windows checkout integration: dependency patch files require LF even when Git
+core.autocrlf is true. The first hosted attempt exposed corrupt empty context
+lines after CRLF conversion; .gitattributes now pins only *.patch to LF. A fresh
+Windows-converting index checkout and both patch application checks passed.
+Archive, patch semantics, baseline and application language standard are unchanged.

@@ -1,0 +1,2 @@
+# Dependency patches must remain parseable when Windows enables core.autocrlf.
+*.patch text eol=lf

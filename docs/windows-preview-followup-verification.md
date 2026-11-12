@@ -102,3 +102,31 @@ eight hours earlier. No hosted pass/failure or cause can be inferred from that
 state. A new branch push will request checks for this follow-up source; keep
 hosted acceptance pending until actual jobs execute. BMP and hideEvent do not
 add dependencies, schema, permissions or runtime network behavior.
+
+
+## First hosted attempt and checkout fix
+
+Revision `6daf0e35c9c3739e3acc00bdcf76264e25283a05`,
+[run 43155314316](https://github.com/Rex60309/FileWeaver/actions/runs/43155314316):
+Windows core, Ubuntu core and analysis/portable-core ASan/UBSan passed. Desktop
+job 130973775054 failed during dependency installation, before compiling the
+application: Git rejected export-unofficial-poppler.patch at line 25 as corrupt.
+
+Reproduction: converting the same patch to CRLF made git apply --check fail at
+line 25 locally. Empty context lines in these patches must remain LF. Added a
+narrow .gitattributes rule, `*.patch text eol=lf`; no application source, limits,
+parser archive, dependency version or test is changed by this fix. Existing
+application builds/tests/format/lint remain applicable; checkout-specific evidence:
+
+```powershell
+# Before fix: CRLF copy reproduced corrupt patch at line 25 (exit 1).
+git -c core.autocrlf=false apply --check --directory=build/poppler-26.11.0 build/poppler-export-crlf.patch
+# After staging .gitattributes, fresh isolated index checkout with Windows conversion:
+git -c core.autocrlf=true checkout-index --all --prefix=build/windows-patch-checkout/
+# Both checked-out patches contained no CR bytes and these checks passed (exit 0):
+git -c core.autocrlf=false apply --check --directory=build/poppler-26.11.0 build/windows-patch-checkout/ports/poppler/export-unofficial-poppler.patch
+git -c core.autocrlf=false apply --check --directory=build/poppler-26.11.0 build/windows-patch-checkout/ports/poppler/private-namespace.patch
+```
+
+The initial failure is not waived. A corrected fresh CI build is required for
+MSVC acceptance. No application tests or warnings were disabled to repair it.
