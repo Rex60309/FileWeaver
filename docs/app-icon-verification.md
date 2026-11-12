@@ -51,3 +51,14 @@ builds now include the icon. Hosted MSVC validation is not yet claimed.
 Windows combined ASan/UBSan is unsupported by this local toolchain; no Windows
 GUI sanitizer claim. No performance claim or release package. Native and Qt
 resource compilation is included in both desktop builds above.
+
+
+## Hosted status
+
+Source revision `7d1d02e76c0d7fcd73c728613ecd82079dc0bdf9` was pushed on
+feat/windows-app-icon. [Quality run 43176504163](https://github.com/Rex60309/FileWeaver/actions/runs/43176504163)
+started and was in progress at this checkpoint. Local Windows GCC builds and
+native resource validation passed as above; no hosted MSVC or new sanitizer pass
+is claimed before that run completes. Core source and parser behavior are unchanged.
+The follow-up documentation-only skip-ci commit changes no source, assets,
+dependencies or build configuration from the revision under verification.
