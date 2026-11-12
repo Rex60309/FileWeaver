@@ -899,9 +899,13 @@ class DesktopTests final : public QObject {
         QVERIFY(parser.isSet(QStringLiteral("help")));
         QVERIFY(parser.helpText().contains(QStringLiteral("--database")));
     }
-    void doesNotSearchImplicitly() {
+    void waitsForIndexSelectionThenBrowsesBoundedFiles() {
         std::atomic<int> calls = 0;
-        SearchWindow window([&](const auto &, const auto &) {
+        std::mutex mutex;
+        fileweaver::SearchRequest last;
+        SearchWindow window([&](const auto &request, const auto &) {
+            const std::lock_guard lock(mutex);
+            last = request;
             ++calls;
             return std::vector<fileweaver::SearchResult>{};
         });
@@ -912,8 +916,15 @@ class DesktopTests final : public QObject {
         QCOMPARE(calls.load(), 0);
         query->clear();
         window.setDatabase(QStringLiteral("C:/synthetic/never-opened.sqlite"));
-        QTest::qWait(230);
-        QCOMPARE(calls.load(), 0);
+        QTRY_COMPARE(calls.load(), 1);
+        {
+            const std::lock_guard lock(mutex);
+            QCOMPARE(last.query, std::string("*"));
+            QVERIFY(last.mode == fileweaver::SearchMode::glob);
+            QCOMPARE(last.limit, std::size_t{100});
+            QCOMPARE(last.sort,
+                     std::optional<fileweaver::SearchSort>{fileweaver::SearchSort::name});
+        }
         QVERIFY(!control<QPushButton>(window, "copyPath")->isEnabled());
     }
 

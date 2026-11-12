@@ -2,6 +2,7 @@
 
 #include "file_open.hpp"
 #include "global_hotkey.hpp"
+#include "index_controller.hpp"
 #include "preferences.hpp"
 #include "preview_controller.hpp"
 #include "search_controller.hpp"
@@ -22,18 +23,22 @@ class QTreeView;
 class QPlainTextEdit;
 class QSpinBox;
 class QEvent;
+class QProgressBar;
 
 namespace fileweaver::desktop {
 class SearchWindow final : public QWidget {
     Q_OBJECT
   public:
-    explicit SearchWindow(SearchController::Search search = fileweaver::search_files,
-                          QWidget *parent = nullptr, HotkeyApi hotkey_api = windowsHotkeyApi(),
+    explicit SearchWindow(SearchController::Search search = {}, QWidget *parent = nullptr,
+                          HotkeyApi hotkey_api = windowsHotkeyApi(),
                           FileOpenController::Open open_file = openSelectedFile,
                           FileOpenController::Open reveal_file = revealSelectedFile,
-                          WatchApi watch_api = windowsWatchApi());
+                          WatchApi watch_api = windowsWatchApi(),
+                          IndexApi index_api = windowsIndexApi(), QString managed_database = {});
     void setDatabase(const QString &path);
     void loadPreferences(const QString &path);
+    // Always shows a confirmation; choosing a folder alone cannot start a scan.
+    void requestIndexFolder(const QString &path);
 
   protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -56,6 +61,15 @@ class SearchWindow final : public QWidget {
     void requestPreview();
     void preferenceChanged();
     void savePreferences();
+    void showIndexReply(const IndexReply &reply);
+    QPushButton *add_folder_;
+    QPushButton *choose_database_;
+    QPushButton *search_button_;
+    QPushButton *index_cancel_;
+    QLabel *index_status_;
+    QProgressBar *index_progress_;
+    QPointer<QDialog> index_confirmation_;
+    QString managed_database_;
     QCheckBox *remember_;
     QSpinBox *font_size_;
     QLabel *preferences_status_;
@@ -103,6 +117,7 @@ class SearchWindow final : public QWidget {
     SearchController controller_;
     FileOpenController opener_;
     WatchController watcher_;
+    IndexController indexer_;
     PreviewController previewer_;
     PreferencesController preferences_;
 };

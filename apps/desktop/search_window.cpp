@@ -23,13 +23,14 @@
 #include <QLocale>
 #include <QPixmap>
 #include <QPlainTextEdit>
+#include <QProgressBar>
 #include <QPushButton>
+#include <QScreen>
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStandardItemModel>
-#include <QStyle>
 #include <QTimeZone>
 #include <QTreeView>
 #include <QVBoxLayout>
@@ -62,43 +63,78 @@ QString parentText(const QString &path) {
 
 SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, HotkeyApi hotkey_api,
                            FileOpenController::Open open_file, FileOpenController::Open reveal_file,
-                           WatchApi watch_api)
-    : QWidget(parent), hotkey_(std::move(hotkey_api)), controller_(std::move(search)),
+                           WatchApi watch_api, IndexApi index_api, QString managed_database)
+    : QWidget(parent), managed_database_(managed_database.isEmpty() ? managedIndexDatabase()
+                                                                    : std::move(managed_database)),
+      hotkey_(std::move(hotkey_api)),
+      controller_(search ? std::move(search)
+                         : SearchController::Search([managed = managed_database_](
+                                                        const auto &request, const auto &stop) {
+                               return desktopSearchFiles(request, stop, managed);
+                           })),
       opener_(std::move(open_file), nullptr, std::move(reveal_file)),
-      watcher_(std::move(watch_api)) {
+      watcher_(std::move(watch_api)), indexer_(std::move(index_api)) {
     auto initial_font = this->font();
     initial_font.setPointSize(10);
     setFont(initial_font);
     setWindowTitle(QStringLiteral("FileWeaver — 檔名搜尋"));
-    setWindowIcon(style()->standardIcon(QStyle::SP_FileDialogContentsView));
-    resize(1000, 650);
+    QSize initial_size(1100, 780);
+    if (const auto *display = screen()) {
+        const auto available = display->availableGeometry().size();
+        if (available.width() >= 800 && available.height() >= 540) {
+            initial_size.setWidth(std::min(initial_size.width(), available.width() - 40));
+            initial_size.setHeight(std::min(initial_size.height(), available.height() - 60));
+        }
+    }
+    resize(initial_size);
     setMinimumSize(760, 480);
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(24, 20, 24, 20);
-    layout->setSpacing(12);
+    layout->setSpacing(8);
     auto *heading = new QLabel(QStringLiteral("FileWeaver"), this);
     auto font = heading->font();
     font.setPointSize(22);
     font.setBold(true);
     heading->setFont(font);
     layout->addWidget(heading);
-    layout->addWidget(new QLabel(QStringLiteral("在本機索引中尋找檔名"), this));
-    auto database_row = std::make_unique<QHBoxLayout>();
+    layout->addWidget(new QLabel(QStringLiteral("加入搜尋資料夾，之後直接搜尋檔案"), this));
+    auto *onboarding = new QHBoxLayout();
+    add_folder_ = new QPushButton(QStringLiteral("加入搜尋資料夾…"), this);
+    add_folder_->setObjectName(QStringLiteral("addFolder"));
+    index_cancel_ = new QPushButton(QStringLiteral("取消建立"), this);
+    index_cancel_->setObjectName(QStringLiteral("cancelIndex"));
+    index_cancel_->setEnabled(false);
+    index_progress_ = new QProgressBar(this);
+    index_progress_->setObjectName(QStringLiteral("indexProgress"));
+    index_progress_->setRange(0, 0);
+    index_progress_->setTextVisible(false);
+    index_progress_->hide();
+    onboarding->addWidget(add_folder_);
+    onboarding->addWidget(index_cancel_);
+    onboarding->addWidget(index_progress_, 1);
+    layout->addLayout(onboarding);
+    index_status_ =
+        new QLabel(QStringLiteral("選擇資料夾後由程式建立索引，不需準備資料庫。"), this);
+    index_status_->setObjectName(QStringLiteral("indexStatus"));
+    index_status_->setTextFormat(Qt::PlainText);
+    index_status_->setWordWrap(true);
+    index_status_->setMaximumHeight(96);
+    layout->addWidget(index_status_);
     database_path_ = new QLineEdit(this);
     database_path_->setObjectName(QStringLiteral("databasePath"));
     database_path_->setAccessibleName(QStringLiteral("目前索引"));
     database_path_->setPlaceholderText(QStringLiteral("尚未選擇索引"));
     database_path_->setReadOnly(true);
-    auto *choose = new QPushButton(QStringLiteral("選擇索引…"), this);
+    auto *choose = new QPushButton(QStringLiteral("使用既有索引…"), this);
+    choose_database_ = choose;
     choose->setObjectName(QStringLiteral("chooseDatabase"));
-    database_row->addWidget(database_path_, 1);
-    database_row->addWidget(choose);
-    layout->addLayout(database_row.release());
+    onboarding->addWidget(database_path_, 1);
+    onboarding->addWidget(choose);
     auto search_row = std::make_unique<QHBoxLayout>();
     query_ = new QLineEdit(this);
     query_->setObjectName(QStringLiteral("query"));
     query_->setAccessibleName(QStringLiteral("檔名搜尋"));
-    query_->setPlaceholderText(QStringLiteral("輸入檔名，例如 報告 或 日本語"));
+    query_->setPlaceholderText(QStringLiteral("輸入關鍵字搜尋；留空顯示檔案"));
     query_->setClearButtonEnabled(true);
     query_->setMaxLength(4096);
     query_->installEventFilter(this);
@@ -119,6 +155,7 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     filter_settings->setObjectName(QStringLiteral("filterSettingsButton"));
     connect(filter_settings, &QPushButton::clicked, this, &SearchWindow::configureFilters);
     auto *search_button = new QPushButton(QStringLiteral("搜尋"), this);
+    search_button_ = search_button;
     search_button->setObjectName(QStringLiteral("search"));
     search_row->addWidget(query_, 1);
     search_row->addWidget(mode_);
@@ -264,7 +301,7 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     });
     connect(&watcher_, &WatchController::updated, this, &SearchWindow::showWatchReply);
     updateWatchControls();
-    status_ = new QLabel(QStringLiteral("選擇現有索引後，即可開始搜尋。"), this);
+    status_ = new QLabel(QStringLiteral("加入搜尋資料夾，或使用既有索引即可開始。"), this);
     status_->setObjectName(QStringLiteral("status"));
     status_->setTextFormat(Qt::PlainText);
     status_->setWordWrap(true);
@@ -412,6 +449,20 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
             setDatabase(selected);
         }
     });
+    connect(add_folder_, &QPushButton::clicked, this, [this] {
+        const auto selected = QFileDialog::getExistingDirectory(
+            this, QStringLiteral("選擇要加入搜尋的資料夾"), {},
+            QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+        if (!selected.isEmpty()) {
+            requestIndexFolder(selected);
+        }
+    });
+    connect(index_cancel_, &QPushButton::clicked, this, [this] {
+        indexer_.cancel();
+        index_cancel_->setEnabled(false);
+        index_status_->setText(QStringLiteral("正在取消；最後有效的索引會保留，請稍候…"));
+    });
+    connect(&indexer_, &IndexController::completed, this, &SearchWindow::showIndexReply);
     connect(results_->selectionModel(), &QItemSelectionModel::currentChanged, this,
             [this] { selectResult(); });
     connect(&controller_, &SearchController::completed, this, &SearchWindow::showReply);
@@ -494,6 +545,9 @@ void SearchWindow::changeEvent(QEvent *event) {
 }
 
 void SearchWindow::setDatabase(const QString &path) {
+    if (indexer_.isBusy()) {
+        return;
+    }
     watcher_.cancel();
     previewer_.clear();
     preview_enabled_->setChecked(false);
@@ -504,19 +558,113 @@ void SearchWindow::setDatabase(const QString &path) {
     watch_status_->setText(QStringLiteral("索引已切換；監控預設關閉。"));
     database_ = path;
     updateWatchControls();
-    database_path_->setText(QDir::toNativeSeparators(path));
+    database_path_->setText(path == managed_database_ ? QStringLiteral("程式管理的搜尋索引")
+                                                      : QDir::toNativeSeparators(path));
+    database_path_->setToolTip(QDir::toNativeSeparators(path));
     schedule();
     query_->setFocus();
 }
 
+void SearchWindow::requestIndexFolder(const QString &path) {
+    if (path.isEmpty() || managed_database_.isEmpty() || indexer_.isBusy() || watcher_.isBusy() ||
+        !index_confirmation_.isNull() || !confirmation_.isNull()) {
+        index_status_->setText(QStringLiteral("請先完成目前工作／停止監控，再加入資料夾。"));
+        return;
+    }
+    auto *dialog = new QDialog(this);
+    dialog->setObjectName(QStringLiteral("indexConfirmation"));
+    dialog->setWindowTitle(QStringLiteral("加入搜尋資料夾"));
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowModality(Qt::WindowModal);
+    dialog->resize(620, 280);
+    auto *layout = new QVBoxLayout(dialog);
+    auto *note = new QLabel(QStringLiteral("將建立下列資料夾的檔名、路徑、大小與時間索引。只處理你"
+                                           "選的資料夾，不讀取檔案內容或修改來源。"),
+                            dialog);
+    note->setWordWrap(true);
+    layout->addWidget(note);
+    auto *source = new QPlainTextEdit(dialog);
+    source->setObjectName(QStringLiteral("indexRoot"));
+    source->setReadOnly(true);
+    source->setPlainText(QDir::toNativeSeparators(path));
+    layout->addWidget(source);
+    auto *storage = new QLabel(QStringLiteral("索引由程式保存於本機應用程式資料夾；不搬移或覆寫你既"
+                                              "有的其他索引。監控與預覽需另外啟用。"),
+                               dialog);
+    storage->setWordWrap(true);
+    storage->setToolTip(QDir::toNativeSeparators(managed_database_));
+    layout->addWidget(storage);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
+    buttons->setObjectName(QStringLiteral("indexConfirmationButtons"));
+    buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("開始建立"));
+    buttons->button(QDialogButtonBox::Ok)->setAutoDefault(false);
+    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    buttons->button(QDialogButtonBox::Cancel)->setDefault(true);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    connect(dialog, &QDialog::accepted, this, [this, path] {
+        if (!watcher_.isBusy() &&
+            indexer_.submit({std::filesystem::path(managed_database_.toStdWString()),
+                             std::filesystem::path(path.toStdWString()),
+                             {}})) {
+            index_status_->setText(QStringLiteral("正在準備／掃描選定資料夾…可隨時要求取消。"));
+            updateWatchControls();
+            schedule();
+        } else {
+            index_status_->setText(QStringLiteral("尚有其他索引工作或監控，請稍後重試。"));
+        }
+    });
+    connect(dialog, &QDialog::finished, this, [this] { index_confirmation_.clear(); });
+    index_confirmation_ = dialog;
+    dialog->open();
+    buttons->button(QDialogButtonBox::Cancel)->setFocus();
+}
+
+void SearchWindow::showIndexReply(const IndexReply &reply) {
+    updateWatchControls();
+    if (reply.cancelled) {
+        index_status_->setText(
+            QStringLiteral("建立已取消；最後有效索引保留。新建的空索引可供下次重試。"));
+        schedule();
+        return;
+    }
+    if (!reply.ok) {
+        index_status_->setText(QStringLiteral("建立索引失敗：") + preview(reply.message, 768));
+        schedule();
+        return;
+    }
+    const auto &summary = reply.summary;
+    index_status_->setText(
+        QStringLiteral("索引已更新：新增 %1／更新 %2，掃描 %3，略過 %4／錯誤 %5。%6")
+            .arg(summary.added)
+            .arg(summary.updated)
+            .arg(summary.scan.files)
+            .arg(summary.scan.skipped)
+            .arg(summary.scan.errors)
+            .arg(summary.missing_reconciled ? QStringLiteral("已核對消失檔案。")
+                                            : QStringLiteral("Missing 尚未核對。")));
+    filters_ = {};
+    query_->clear();
+    setDatabase(reply.database);
+}
+
 void SearchWindow::updateWatchControls() {
     const auto busy = watcher_.isBusy();
-    watch_load_->setEnabled(!database_.isEmpty() && !busy);
-    watch_root_->setEnabled(!busy && !watch_roots_.empty());
+    const auto indexing = indexer_.isBusy();
+    query_->setEnabled(!indexing);
+    mode_->setEnabled(!indexing);
+    search_button_->setEnabled(!indexing);
+    add_folder_->setEnabled(!busy && !indexing && !managed_database_.isEmpty());
+    choose_database_->setEnabled(!indexing);
+    index_cancel_->setEnabled(indexing);
+    index_progress_->setVisible(indexing);
+    watch_load_->setEnabled(!database_.isEmpty() && !busy && !indexing);
+    watch_root_->setEnabled(!busy && !indexing && !watch_roots_.empty());
     const auto index = watch_root_->currentIndex();
     const bool known = index >= 0 && static_cast<std::size_t>(index) < watch_roots_.size() &&
                        watch_roots_[static_cast<std::size_t>(index)].policy_known;
-    watch_start_->setEnabled(!busy && known);
+    watch_start_->setEnabled(!busy && !indexing && known);
     watch_stop_->setEnabled(busy);
 }
 void SearchWindow::showWatchReply(const WatchReply &reply) {
@@ -566,12 +714,16 @@ void SearchWindow::schedule() {
     controller_.cancel();
     debounce_.stop();
     clearResults();
+    if (indexer_.isBusy()) {
+        status_->setText(
+            QStringLiteral("索引建立中；完成後會自動顯示檔案，可按「取消建立」停止。"));
+        return;
+    }
     if (database_.isEmpty()) {
-        status_->setText(QStringLiteral("請先選擇現有索引。"));
-    } else if (query_->text().isEmpty()) {
-        status_->setText(QStringLiteral("輸入檔名開始搜尋。"));
+        status_->setText(QStringLiteral("請加入搜尋資料夾，或使用既有索引。"));
     } else {
-        status_->setText(QStringLiteral("正在準備搜尋…"));
+        status_->setText(query_->text().isEmpty() ? QStringLiteral("正在讀取檔案清單…")
+                                                  : QStringLiteral("正在準備搜尋…"));
         debounce_.start();
     }
 }
@@ -580,7 +732,7 @@ void SearchWindow::searchNow() {
     debounce_.stop();
     controller_.cancel();
     clearResults();
-    if (database_.isEmpty() || query_->text().isEmpty()) {
+    if (database_.isEmpty() || indexer_.isBusy()) {
         schedule();
         return;
     }
@@ -589,7 +741,9 @@ void SearchWindow::searchNow() {
         status_->setText(QStringLiteral("搜尋文字太長，請縮短後重試。"));
         return;
     }
-    SearchRequest request{std::filesystem::path(database_.toStdWString()), query.toStdString()};
+    const bool browsing = query.isEmpty();
+    SearchRequest request{std::filesystem::path(database_.toStdWString()),
+                          browsing ? std::string("*") : query.toStdString()};
     const auto mode = mode_->currentIndex();
     request.mode = mode == 1                ? SearchMode::prefix
                    : mode == 2              ? SearchMode::exact
@@ -604,6 +758,11 @@ void SearchWindow::searchNow() {
                                                                     : SearchSort::name);
     request.fuzzy = fuzzy_;
     request.fuzzy.path_components = mode == 6;
+    if (browsing) {
+        request.mode = SearchMode::glob;
+        request.fuzzy.path_components = false;
+        request.sort = sort_ && *sort_ != SearchSort::relevance ? *sort_ : SearchSort::name;
+    }
     status_->setText(QStringLiteral("正在搜尋…"));
     controller_.submit(std::move(request));
 }
@@ -791,10 +950,16 @@ void SearchWindow::showReply(const SearchReply &reply) {
         name->setData(path, Qt::UserRole);
         model_->appendRow({name.release(), location.release(), size.release()});
     }
-    status_->setText(reply.results.empty() ? QStringLiteral("找不到符合的檔名。")
-                                           : QStringLiteral("找到 %1 筆結果（最多 %2 筆）。")
-                                                 .arg(model_->rowCount())
-                                                 .arg(result_limit_));
+    status_->setText(
+        reply.results.empty()
+            ? (query_->text().isEmpty()
+                   ? QStringLiteral("沒有符合條件的檔案；可加入搜尋資料夾，或調整篩選。")
+                   : QStringLiteral("找不到符合的檔名。"))
+            : (query_->text().isEmpty()
+                   ? QStringLiteral("顯示 %1 筆檔案（最多 %2 筆）；輸入關鍵字縮小範圍。")
+                   : QStringLiteral("找到 %1 筆結果（最多 %2 筆）。"))
+                  .arg(model_->rowCount())
+                  .arg(result_limit_));
     if (model_->rowCount() > 0) {
         results_->setCurrentIndex(model_->index(0, 0));
     }
@@ -944,6 +1109,10 @@ void SearchWindow::closeEvent(QCloseEvent *event) {
     controller_.cancel();
     opener_.cancel();
     watcher_.cancel();
+    indexer_.cancel();
+    if (!index_confirmation_.isNull()) {
+        index_confirmation_->reject();
+    }
     previewer_.clear();
     if (!confirmation_.isNull()) {
         confirmation_->reject();

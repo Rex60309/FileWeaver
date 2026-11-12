@@ -17,6 +17,8 @@ int main(int argc, char *argv[]) {
     fileweaver::desktop::SearchWindow window;
     if (parser.isSet(QStringLiteral("database"))) {
         window.setDatabase(parser.value(QStringLiteral("database")));
+    } else if (!fileweaver::desktop::managedIndexDatabase().isEmpty()) {
+        window.setDatabase(fileweaver::desktop::managedIndexDatabase());
     }
     window.loadPreferences(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) +
                            QStringLiteral("/preferences.json"));
