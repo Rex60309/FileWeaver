@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>FileWeaver</title>
+  <rect width="256" height="256" rx="48" fill="#132237"/>
+  <path d="M64 40h80l48 48v128H64z" fill="#f8fafc"/>
+  <path d="M144 40v48h48z" fill="#bae6fd"/>
+  <path d="M84 116l20 64 24-40" fill="none" stroke="#0d9488" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M128 140l24 40 20-64" fill="none" stroke="#0284c7" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

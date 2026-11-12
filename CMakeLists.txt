@@ -118,6 +118,13 @@ if(FILEWEAVER_BUILD_DESKTOP)
   target_include_directories(fileweaver_desktop_ui PUBLIC apps/desktop)
   target_link_libraries(fileweaver_desktop_ui PUBLIC fileweaver_storage fileweaver_preview Qt6::Widgets PRIVATE Threads::Threads user32 shell32 ole32)
   qt_add_executable(fileweaver-desktop WIN32 apps/desktop/main.cpp)
+  enable_language(RC)
+  target_sources(fileweaver-desktop PRIVATE apps/desktop/fileweaver.rc)
+  target_include_directories(fileweaver-desktop PRIVATE apps/desktop/assets)
+  qt_add_resources(fileweaver-desktop fileweaver_branding
+    PREFIX "/branding"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/apps/desktop/assets"
+    FILES "${CMAKE_CURRENT_SOURCE_DIR}/apps/desktop/assets/fileweaver.png")
   target_link_libraries(fileweaver-desktop PRIVATE fileweaver_desktop_ui)
   qt_add_executable(desktop_tests tests/desktop/search_window_test.cpp)
   set_target_properties(desktop_tests PROPERTIES AUTOMOC ON WIN32_EXECUTABLE FALSE)

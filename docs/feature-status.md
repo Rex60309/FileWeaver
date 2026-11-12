@@ -16,6 +16,8 @@ hide-lifecycle fix also passed all local and hosted gates
 ([evidence](windows-preview-followup-verification.md)).
 The separately authorized GIF first-frame extension passed local and hosted
 Windows checks; see [verification evidence](gif-preview-verification.md).
+App icon native/Qt resources passed local Windows GCC checks; see
+[verification](app-icon-verification.md) for the separate hosted status.
 This is not a formal release.
 The Windows global-hotkey slice also passed native interaction and hosted MSVC
 Debug/Release checks; see [its acceptance evidence](global-hotkey-verification.md).
@@ -69,6 +71,7 @@ Further work is prioritized for Windows; release packaging is out of scope.
 | 2 extension | Opt-in GIF first-frame preview, explicit static label and existing limits | Tested |
 | 2 extension | Opt-in isolated PDF first-page preview using pinned Poppler | Tested |
 | 2 extension | Opt-in BMP static preview and all-format hide lifecycle regression | Tested |
+| 2 presentation | Original app logo, embedded Windows executable icon and Qt window icon (local Windows GCC) | Tested |
 | Future | Multi-root/CLI watch and PDF navigation/interaction | Planned |
 | 3 | Analysis, duplicates, organizer, rename, journal | Planned |
 | 4 | Project launcher, opt-in clipboard, activity | Planned |
