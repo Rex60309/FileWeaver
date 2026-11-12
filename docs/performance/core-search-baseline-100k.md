@@ -1,7 +1,7 @@
 # Application search baseline — 100000 synthetic files
 
-Measured: 2026-11-08 14:54 UTC. Single-machine developer evidence; not SPEC latency
-acceptance, a controlled cold-cache experiment, or a release claim.
+Measured: 2026-11-08 14:54 UTC on one development machine. Caches were already
+warm; this run alone cannot establish the specification's latency targets.
 
 ## Reproduction
 
@@ -34,8 +34,8 @@ paths, user/computer names or real file metadata.
 
 ## Observed results
 
-Milliseconds, rounded to four decimal places. Compare only within the stated
-timing envelope; these are not interchangeable implementations or speed ratios.
+Times are in milliseconds, rounded to four decimal places. Check what each
+method times before comparing rows; they include different amounts of work.
 
 | Method | Mode | p50 ms | p95 ms |
 | --- | --- | --- | --- |
@@ -57,11 +57,12 @@ name/path/size tuples outside its interval, and Python checks expected counts.
 The native method runs after all three baselines; its first observation is already
 influenced by warm OS caches. Fixture generation/indexing also warms caches. No
 cache eviction, cold-cache claim, CPU isolation or background-load control.
-Different query populations, larger/multilingual/nested datasets and repeated
-independent runs are still needed. This adds measurement, not a search speedup.
+The next useful checks are different queries, larger multilingual/nested datasets
+and repeated independent runs. The search algorithm was unchanged for this run.
 
 Driver peak RSS: 34983936 bytes. CLI/native-helper peak RSS are unmeasured.
-No optimized-index baseline, controlled cold-cache or SPEC target claim.
+This run did not test an optimized-index baseline, controlled cold caches or
+compliance with SPEC targets.
 
 ## Artifact identity
 

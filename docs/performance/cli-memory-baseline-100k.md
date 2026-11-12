@@ -1,7 +1,8 @@
 # CLI search memory observations — 100000 synthetic files
 
-Measured: 2026-11-08 15:27 UTC. One Windows developer run; not whole-product memory
-acceptance, a search speedup, a guaranteed maximum, or a leak/allocation analysis.
+Measured: 2026-11-08 15:27 UTC on one Windows development machine. This report
+records process memory peaks for the queries below. It does not measure the
+whole application, diagnose leaks or set a maximum for other workloads.
 
 ## Reproduction and report
 
@@ -79,8 +80,8 @@ No cache eviction or CPU/background-load isolation. Fixture/indexing warms OS
 caches; native calls run after the other timed methods, CLI memory cases afterward.
 The application interval includes connection/transaction/schema/SQL/result creation,
 excluding request preparation, result destruction, correctness and serialization.
-No cold-cache, SPEC target or optimization claim. No production algorithm changed.
-Broader Unicode/nested/large datasets and cross-platform execution remain.
+Cold-cache behavior and SPEC targets were not tested. The production algorithm
+was unchanged. Unicode/nested/large datasets and other platforms still need checks.
 
 ## Identity and safety
 

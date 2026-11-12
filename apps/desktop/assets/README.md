@@ -10,5 +10,5 @@ interlocking strokes. No fonts or downloaded artwork are required.
 
 Raster exports used Windows System.Drawing, drawing the same vector geometry at
 1024x1024 with antialiasing, then high-quality downsampling. ICO directory entries
-wrap the exported PNG frames. These are intentional product assets, not temporary
-build output. Building/running FileWeaver requires no asset generator or new package.
+wrap the exported PNG frames. CMake uses these files directly, so building or
+running the app does not require an asset generator or an extra package.

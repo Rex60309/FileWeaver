@@ -72,3 +72,25 @@ __pycache__/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Local product planning and AI-agent instructions (kept on disk).
+AGENTS.md
+AGENTS.local.md
+/PRODUCT_SPEC.md
+/SPEC.md
+CLAUDE.md
+GEMINI.md
+.cursorrules
+.cursorignore
+.agents/
+.codex/
+.claude/
+.cursor/
+
+# Local development history; publish architecture and curated measurements instead.
+/docs/decisions/
+/docs/*-verification.md
+/docs/verification.md
+/docs/*-acceptance.md
+/docs/feature-status.md
+/docs/repository-hygiene.md

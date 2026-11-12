@@ -1,7 +1,7 @@
 # Nested Unicode search baseline — 100000 synthetic files
 
-Measured: 2026-11-08 15:48 UTC. Single-machine developer evidence, not performance
-target compliance or a comparison establishing a speedup over a different corpus.
+Measured: 2026-11-08 15:48 UTC on one development machine. The results apply to
+the dataset below; a different dataset would need its own comparison.
 
 ## Reproduction and identity
 
@@ -60,8 +60,9 @@ support malformed native UTF-16 names. No user files/content are used.
 
 ## Observed latency
 
-Milliseconds. Different method/profile envelopes and query populations are not
-algorithm speed ratios. Recursive baseline uses os.walk plus selected-file stats.
+Times are in milliseconds. Each method includes different work, so ratios between
+rows do not isolate algorithm speed. The recursive baseline uses os.walk and
+reads metadata for selected files.
 
 | Method | Mode | p50 ms | p95 ms |
 | --- | --- | --- | --- |
@@ -79,8 +80,9 @@ Recursive substring measured tails include 1924.5398 ms and 1890.1130 ms for
 established. No CPU/background-load isolation or cache eviction; fixture/indexing
 warms caches. Native calls run after other timed methods, memory searches afterward.
 Application timing includes connection/transaction/schema/SQL/result construction,
-excluding request/oracle/validation, result destruction and JSON. No raw SQL-only,
-cold-cache, optimization or SPEC latency claim.
+excluding request/oracle/validation, result destruction and JSON. The run did not
+measure raw SQL alone, cold-cache behavior or progress toward SPEC latency targets.
+The search algorithm was unchanged.
 
 ## Observed memory
 

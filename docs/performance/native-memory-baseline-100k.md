@@ -1,7 +1,8 @@
 # Native benchmark memory baseline — 100000 synthetic files
 
-Measured: 2026-11-08 15:11 UTC. Single-machine Windows developer measurement, not
-whole-product memory acceptance or evidence of a performance/memory improvement.
+Measured: 2026-11-08 15:11 UTC on one Windows development machine. This run
+measures the benchmark process; it does not cover the whole application or
+compare memory use before and after an optimization.
 
 ## Reproduction and artifacts
 
@@ -45,14 +46,14 @@ startup, arguments, oracle, results/validation and sample buffers through the
 second snapshot, before report serialization/teardown. Do not subtract these
 peaks to estimate search allocations or diagnose leaks. They do not account for
 unresident allocations or the system-wide filesystem cache. Snapshot calls are
-outside timed search intervals. See ADR-0016 for API references and failure states.
+outside timed search intervals. The report records whether each reading was available.
 
 ## Timing observations in this run
 
 Milliseconds, nearest rank pooled across 15 measured calls per method/mode.
-Different envelopes are not algorithm speed ratios; caches are uncontrolled and
-already warm. Native method runs after other baselines. No CPU/background-load
-isolation. No change in the search algorithm was made.
+Each method times different work. Caches were already warm, and the native
+method ran after the other baselines. Background CPU load was not controlled.
+The search algorithm was unchanged.
 
 | Method | Mode | p50 ms | p95 ms |
 | --- | --- | --- | --- |
@@ -67,9 +68,9 @@ isolation. No change in the search algorithm was made.
 
 Native interval includes connection open/close, read transaction, schema checks,
 SQL preparation/execution and result construction; excludes request construction,
-result destruction, oracle/validation and JSON. No reused connection or controlled
-cold-cache claim. Small capped results and synthetic ASCII fixtures cannot establish
-memory/latency targets for larger varied real datasets, GUI or the whole product.
+result destruction, oracle/validation and JSON. Connections were not reused, and
+cold caches were not tested. The small result limit and synthetic ASCII files
+also leave memory/latency for larger real datasets and the GUI untested.
 Linux runtime/sanitizer evidence, CLI peak RSS and optimized-index comparisons remain.
 
 ## Identity

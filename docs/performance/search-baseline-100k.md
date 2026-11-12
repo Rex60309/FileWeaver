@@ -1,7 +1,7 @@
 # Search baseline — 100000 synthetic files
 
-Measured: 2026-11-08 09:27 UTC. This is a single-machine developer baseline, not
-SPEC core-latency acceptance or a release claim.
+Measured: 2026-11-08 09:27 UTC on one development machine. These results describe
+this run; more testing is needed to check the specification's latency targets.
 
 ## Reproduction
 
@@ -51,10 +51,10 @@ Nearest-rank percentiles pooled over three queries per mode, five repetitions
 | Python flat directory filename scan + selected stats | exact | 92.8186 | 100.5623 |
 | Python flat directory filename scan + selected stats | substring | 104.1882 | 123.9488 |
 
-These rows have different execution envelopes and may use different SQLite
-versions. They do not demonstrate an isolated C++ algorithm speedup. Five measured
-repetitions per query provide limited tail evidence; no confidence interval,
-background-load/power control or cross-machine replication is claimed.
+Each row times different work and may use a different SQLite version, so the
+numbers cannot isolate the effect of the C++ algorithm. Five measured repetitions
+per query give only a rough picture of slower queries. This run did not calculate
+confidence intervals, control background load/power, or repeat on other machines.
 
 ## Cache, provenance and remaining coverage
 
@@ -67,7 +67,7 @@ Runner SHA-256: 2584bbfff221b5bdf675afcd5be278829ae3ec49a1889054bed6cc562fa9918f
 Dependency baseline is included in the raw report. No personal/temp paths, host or
 user names were found in the report's path-pattern review.
 
-Still required: core-only harness and native peak RSS, controlled cold-cache
-measurements, optimized/trigram/fuzzy comparison if implemented, richer datasets,
-larger scales and supported-platform/CI checks. Do not use these numbers to claim
-the SPEC exact/substring/fuzzy p95 targets or Phase 1 release readiness.
+At the time of this run, core-only timing, native peak RSS, cold-cache tests and
+comparisons with optimized/trigram/fuzzy search were still missing. Larger, more
+varied datasets and other platforms also need testing before checking the SPEC
+exact/substring/fuzzy p95 targets or Phase 1 release readiness.
