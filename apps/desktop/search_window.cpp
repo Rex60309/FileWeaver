@@ -933,6 +933,12 @@ bool SearchWindow::eventFilter(QObject *watched, QEvent *event) {
     return QWidget::eventFilter(watched, event);
 }
 
+void SearchWindow::hideEvent(QHideEvent *event) {
+    preview_enabled_->setChecked(false);
+    previewer_.clear();
+    QWidget::hideEvent(event);
+}
+
 void SearchWindow::closeEvent(QCloseEvent *event) {
     debounce_.stop();
     controller_.cancel();

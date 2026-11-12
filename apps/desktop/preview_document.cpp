@@ -211,7 +211,7 @@ QByteArray previewDocument(const PreviewRequest &request) {
     try {
         const auto extension = QFileInfo(path).suffix().toLower();
         const bool image = extension == u"png" || extension == u"jpg" || extension == u"jpeg" ||
-                           extension == u"gif";
+                           extension == u"gif" || extension == u"bmp";
         const bool pdf = extension == u"pdf";
         const QStringList text_types{
             QStringLiteral("txt"),  QStringLiteral("md"),  QStringLiteral("markdown"),
@@ -257,9 +257,15 @@ QByteArray previewDocument(const PreviewRequest &request) {
                     input.open(QIODevice::ReadOnly);
                     QImageReader reader(&input, extension == u"png"   ? "png"
                                                 : extension == u"gif" ? "gif"
+                                                : extension == u"bmp" ? "bmp"
                                                                       : "jpeg");
                     reader.setAutoDetectImageFormat(false);
-                    const auto size = reader.size();
+                    auto size = reader.size();
+                    // BMP uses a signed height for top-down storage. Bound it
+                    // before negation, including the unrepresentable INT_MIN.
+                    if (extension == u"bmp" && size.height() >= -8192 && size.height() < 0) {
+                        size.setHeight(-size.height());
+                    }
                     validateImageSize(size);
                     auto scaled = size.scaled(256, 256, Qt::KeepAspectRatio);
                     scaled.setWidth(std::max(1, scaled.width()));

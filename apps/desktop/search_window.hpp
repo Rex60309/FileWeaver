@@ -38,6 +38,7 @@ class SearchWindow final : public QWidget {
   protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
+    void hideEvent(QHideEvent *event) override;
     void changeEvent(QEvent *event) override;
 
   private:
