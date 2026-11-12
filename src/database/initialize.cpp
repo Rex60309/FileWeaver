@@ -981,6 +981,30 @@ std::vector<SearchResult> search_files(const SearchRequest &request, const std::
             extension->insert(extension->begin(), '.');
         }
     }
+    auto extensions = filters.extensions;
+    if (extensions.size() > 64) {
+        throw StorageError("At most 64 extension filters are supported", 2);
+    }
+    for (auto &value : extensions) {
+        if (value.size() > 4096 || value.find('\0') != std::string::npos ||
+            value.find_first_of("/\\") != std::string::npos) {
+            throw StorageError("Invalid extension filter", 2);
+        }
+        if (!value.empty() && value.front() != '.') {
+            value.insert(value.begin(), '.');
+        }
+    }
+    std::string type_predicate;
+    if (!extensions.empty()) {
+        type_predicate = "AND lower(extension) IN (";
+        for (std::size_t i = 0; i < extensions.size(); ++i) {
+            if (i != 0) {
+                type_predicate += ',';
+            }
+            type_predicate += "lower(?" + std::to_string(i + 9) + ")";
+        }
+        type_predicate += ") ";
+    }
     std::optional<std::string> root_key;
     if (filters.root) {
         if (filters.root->empty() || utf8(*filters.root).find('\0') != std::string::npos) {
@@ -1051,8 +1075,11 @@ std::vector<SearchResult> search_files(const SearchRequest &request, const std::
         "AND (?4 IS NULL OR size_bytes>=?4) AND (?5 IS NULL OR size_bytes<=?5) "
         "AND (?6 IS NULL OR root_id IN (SELECT id FROM roots WHERE normalized_path=?6)) "
         "AND (?7 IS NULL OR modified_at>?7) AND (?8 IS NULL OR modified_at<?8) " +
-        ordering;
+        type_predicate + ordering;
     auto query = prepare(db.get(), sql.c_str());
+    for (std::size_t i = 0; i < extensions.size(); ++i) {
+        bind_text(query.get(), static_cast<int>(i + 9), extensions[i]);
+    }
     bind_text(query.get(), 1, request.query);
     bind_integer(query.get(), 2, (fuzzy || glob) ? -1 : static_cast<std::int64_t>(request.limit));
     const auto bind_null = [&](int position) {

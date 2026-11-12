@@ -7,9 +7,11 @@
 #include "preview_controller.hpp"
 #include "search_controller.hpp"
 #include "watch_controller.hpp"
+#include <QPixmap>
 #include <QPointer>
 #include <QTimer>
 #include <QWidget>
+#include <utility>
 
 class QDialog;
 class QCheckBox;
@@ -61,6 +63,10 @@ class SearchWindow final : public QWidget {
     void requestPreview();
     void preferenceChanged();
     void savePreferences();
+    void updatePreviewImage();
+    QPixmap preview_pixmap_;
+    QSpinBox *visible_limit_ = nullptr;
+    std::vector<std::pair<QCheckBox *, std::vector<std::string>>> type_filters_;
     void showIndexReply(const IndexReply &reply);
     QPushButton *add_folder_;
     QPushButton *choose_database_;
@@ -78,7 +84,7 @@ class SearchWindow final : public QWidget {
     bool preferences_dirty_ = false;
     QCheckBox *preview_enabled_;
     QLabel *preview_status_;
-    QLabel *preview_image_;
+    QLabel *preview_image_ = nullptr;
     QPlainTextEdit *preview_text_ = nullptr;
     QWidget *preview_pane_;
     SearchFilters filters_{};

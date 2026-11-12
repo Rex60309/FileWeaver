@@ -13,6 +13,7 @@
 #include <QFileDialog>
 #include <QFontDatabase>
 #include <QFormLayout>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QItemSelectionModel>
@@ -28,6 +29,7 @@
 #include <QScreen>
 #include <QShortcut>
 #include <QSignalBlocker>
+#include <QSizePolicy>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStandardItemModel>
@@ -78,7 +80,7 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     initial_font.setPointSize(10);
     setFont(initial_font);
     setWindowTitle(QStringLiteral("FileWeaver — 檔名搜尋"));
-    QSize initial_size(1100, 780);
+    QSize initial_size(1280, 900);
     if (const auto *display = screen()) {
         const auto available = display->availableGeometry().size();
         if (available.width() >= 800 && available.height() >= 540) {
@@ -173,13 +175,27 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     hotkey_row->addWidget(hotkey_enabled_);
     hotkey_row->addWidget(hotkey_sequence_);
     hotkey_row->addStretch();
-    layout->addLayout(hotkey_row.release());
+    auto *settings = new QWidget(this);
+    settings->setObjectName(QStringLiteral("advancedSettings"));
+    auto *settings_layout = new QVBoxLayout(settings);
+    settings_layout->setContentsMargins(0, 0, 0, 0);
+    auto *compact = new QPushButton(QStringLiteral("收起快捷鍵／監控／偏好設定"), this);
+    compact->setObjectName(QStringLiteral("compactSettings"));
+    compact->setCheckable(true);
+    layout->addWidget(compact);
+    layout->addWidget(settings);
+    connect(compact, &QPushButton::toggled, this, [settings, compact](bool hidden) {
+        settings->setVisible(!hidden);
+        compact->setText(hidden ? QStringLiteral("展開快捷鍵／監控／偏好設定")
+                                : QStringLiteral("收起快捷鍵／監控／偏好設定"));
+    });
+    settings_layout->addLayout(hotkey_row.release());
     hotkey_status_ =
         new QLabel(QStringLiteral("快捷鍵未啟用；可選擇記住組合，下次仍需手動啟用。"), this);
     hotkey_status_->setObjectName(QStringLiteral("hotkeyStatus"));
     hotkey_status_->setTextFormat(Qt::PlainText);
     hotkey_status_->setWordWrap(true);
-    layout->addWidget(hotkey_status_);
+    settings_layout->addWidget(hotkey_status_);
     connect(hotkey_enabled_, &QCheckBox::toggled, this, &SearchWindow::updateHotkey);
     connect(&hotkey_, &GlobalHotkey::activated, this, &SearchWindow::activateSearch);
     auto *preferences_row = new QHBoxLayout();
@@ -195,13 +211,13 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     preferences_row->addWidget(new QLabel(QStringLiteral("字級"), this));
     preferences_row->addWidget(font_size_);
     preferences_row->addStretch();
-    layout->addLayout(preferences_row);
+    settings_layout->addLayout(preferences_row);
     preferences_status_ =
         new QLabel(QStringLiteral("偏好設定不包含查詢、路徑或內容；啟用狀態不保存。"), this);
     preferences_status_->setObjectName(QStringLiteral("preferencesStatus"));
     preferences_status_->setTextFormat(Qt::PlainText);
     preferences_status_->setWordWrap(true);
-    layout->addWidget(preferences_status_);
+    settings_layout->addWidget(preferences_status_);
     connect(remember_, &QCheckBox::toggled, this, [this] {
         if (!applying_preferences_) {
             preferences_dirty_ = true;
@@ -238,6 +254,9 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
                                                      : static_cast<SearchSort>(reply.value.sort);
                         descending_ = reply.value.descending;
                         result_limit_ = static_cast<std::size_t>(reply.value.limit);
+                        if (visible_limit_) {
+                            visible_limit_->setValue(reply.value.limit);
+                        }
                         hotkey_sequence_->setKeySequence(QKeySequence::fromString(
                             reply.value.hotkey, QKeySequence::PortableText));
                         mode_->setCurrentIndex(reply.value.mode);
@@ -268,12 +287,12 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     watch_row->addWidget(watch_root_, 1);
     watch_row->addWidget(watch_start_);
     watch_row->addWidget(watch_stop_);
-    layout->addLayout(watch_row.release());
+    settings_layout->addLayout(watch_row.release());
     watch_status_ = new QLabel(QStringLiteral("監控未啟用；只有手動啟用後才會背景重掃。"), this);
     watch_status_->setObjectName(QStringLiteral("watchStatus"));
     watch_status_->setTextFormat(Qt::PlainText);
     watch_status_->setWordWrap(true);
-    layout->addWidget(watch_status_);
+    settings_layout->addWidget(watch_status_);
     connect(watch_load_, &QPushButton::clicked, this, [this] {
         if (watcher_.load(std::filesystem::path(database_.toStdWString()))) {
             watch_status_->setText(QStringLiteral("正在讀取已登錄根目錄…"));
@@ -338,7 +357,53 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     layout->addLayout(preview_row);
     auto *splitter = new QSplitter(Qt::Horizontal, this);
     splitter->addWidget(results_);
-    preview_pane_ = new QWidget(splitter);
+    auto *sidebar = new QWidget(splitter);
+    auto *sidebar_layout = new QVBoxLayout(sidebar);
+    sidebar_layout->setContentsMargins(0, 0, 0, 0);
+    auto *types = new QGroupBox(QStringLiteral("檔案類型（可複選；未勾選為全部）"), sidebar);
+    types->setObjectName(QStringLiteral("typeFilters"));
+    types->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    auto types_layout = std::make_unique<QVBoxLayout>();
+    const std::vector<std::pair<QString, std::vector<std::string>>> groups{
+        {QStringLiteral("圖片"),
+         {"png", "jpg", "jpeg", "bmp", "gif", "webp", "tif", "tiff", "svg", "ico"}},
+        {QStringLiteral("文件"),
+         {"pdf", "txt", "md", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "csv"}},
+        {QStringLiteral("影音"),
+         {"mp4", "mkv", "avi", "mov", "webm", "mp3", "wav", "flac", "m4a", "ogg"}},
+        {QStringLiteral("程式碼"),
+         {"cpp", "hpp", "c", "h", "py", "js", "ts", "json", "xml", "html", "css", "rs", "go",
+          "java"}},
+        {QStringLiteral("壓縮檔"), {"zip", "rar", "7z", "tar", "gz"}}};
+    for (std::size_t i = 0; i < groups.size(); ++i) {
+        auto *check = new QCheckBox(groups[i].first, types);
+        check->setObjectName(QStringLiteral("typeFilter%1").arg(i));
+        QStringList suffixes;
+        for (const auto &suffix : groups[i].second) {
+            suffixes.append(QString::fromStdString(suffix));
+        }
+        check->setToolTip(suffixes.join(QStringLiteral(", ")));
+        type_filters_.emplace_back(check, groups[i].second);
+        types_layout->addWidget(check);
+        connect(check, &QCheckBox::toggled, this, &SearchWindow::schedule);
+    }
+    types->setLayout(types_layout.release());
+    sidebar_layout->addWidget(types);
+    auto *limit_row = new QHBoxLayout();
+    limit_row->addWidget(new QLabel(QStringLiteral("最多顯示"), sidebar));
+    visible_limit_ = new QSpinBox(sidebar);
+    visible_limit_->setObjectName(QStringLiteral("visibleResultLimit"));
+    visible_limit_->setRange(1, 1000);
+    visible_limit_->setValue(static_cast<int>(result_limit_));
+    limit_row->addWidget(visible_limit_);
+    limit_row->addStretch();
+    sidebar_layout->addLayout(limit_row);
+    connect(visible_limit_, &QSpinBox::valueChanged, this, [this](int value) {
+        result_limit_ = static_cast<std::size_t>(value);
+        preferenceChanged();
+        schedule();
+    });
+    preview_pane_ = new QWidget(sidebar);
     preview_pane_->setObjectName(QStringLiteral("previewPane"));
     auto *preview_layout = new QVBoxLayout(preview_pane_);
     preview_status_ = new QLabel(QStringLiteral("預覽未啟用；不會讀取檔案內容。"), preview_pane_);
@@ -349,6 +414,9 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     preview_image_ = new QLabel(preview_pane_);
     preview_image_->setObjectName(QStringLiteral("previewImage"));
     preview_image_->setAlignment(Qt::AlignCenter);
+    preview_image_->setMinimumSize(1, 1);
+    preview_image_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+    preview_image_->installEventFilter(this);
     preview_text_ = new QPlainTextEdit(preview_pane_);
     preview_text_->setObjectName(QStringLiteral("previewText"));
     preview_text_->setAccessibleName(QStringLiteral("唯讀內容預覽"));
@@ -361,9 +429,13 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     preview_text_->setFont(preview_font);
     new PreviewHighlighter(preview_text_->document());
     preview_layout->addWidget(preview_status_);
-    preview_layout->addWidget(preview_image_);
+    preview_layout->addWidget(preview_image_, 1);
+    preview_image_->hide();
+    preview_text_->hide();
     preview_layout->addWidget(preview_text_, 1);
-    splitter->addWidget(preview_pane_);
+    sidebar_layout->addWidget(preview_pane_, 1);
+    sidebar_layout->addStretch(0);
+    splitter->addWidget(sidebar);
     splitter->setStretchFactor(0, 2);
     splitter->setStretchFactor(1, 1);
     preview_pane_->hide();
@@ -373,12 +445,18 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
         previewer_.clear();
         preview_text_->clear();
         preview_image_->clear();
+        preview_pixmap_ = {};
+        preview_text_->hide();
+        preview_image_->hide();
         requestPreview();
     });
     connect(clear_preview, &QPushButton::clicked, this, [this] {
         previewer_.clear();
         preview_text_->clear();
         preview_image_->clear();
+        preview_pixmap_ = {};
+        preview_text_->hide();
+        preview_image_->hide();
         preview_status_->setText(QStringLiteral("快取已要求清除；重新選取檔案可再次預覽。"));
     });
     connect(external_open, &QPushButton::clicked, this,
@@ -389,11 +467,17 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
         }
         preview_text_->clear();
         preview_image_->clear();
+        preview_pixmap_ = {};
+        preview_text_->hide();
+        preview_image_->hide();
         preview_status_->setText(preview(reply.message, 512));
         if (reply.ok) {
             preview_text_->setPlainText(reply.text);
+            preview_text_->setVisible(reply.image.isNull());
+            preview_image_->setVisible(!reply.image.isNull());
             if (!reply.image.isNull()) {
-                preview_image_->setPixmap(QPixmap::fromImage(reply.image));
+                preview_pixmap_ = QPixmap::fromImage(reply.image);
+                updatePreviewImage();
             }
         }
     });
@@ -703,6 +787,7 @@ void SearchWindow::clearResults() {
     previewer_.clear();
     preview_text_->clear();
     preview_image_->clear();
+    preview_pixmap_ = {};
     model_->removeRows(0, model_->rowCount());
     selected_path_->clear();
     copy_->setEnabled(false);
@@ -756,6 +841,12 @@ void SearchWindow::searchNow() {
     request.descending = descending_;
     request.sort = sort_.value_or(request.mode == SearchMode::fuzzy ? SearchSort::relevance
                                                                     : SearchSort::name);
+    for (const auto &[check, extensions] : type_filters_) {
+        if (check->isChecked()) {
+            request.filters.extensions.insert(request.filters.extensions.end(), extensions.begin(),
+                                              extensions.end());
+        }
+    }
     request.fuzzy = fuzzy_;
     request.fuzzy.path_components = mode == 6;
     if (browsing) {
@@ -882,6 +973,7 @@ void SearchWindow::configureFilters() {
                                 : static_cast<SearchSort>(sort->currentIndex() - 1);
                     descending_ = descending->isChecked();
                     result_limit_ = static_cast<std::size_t>(limit->value());
+                    visible_limit_->setValue(limit->value());
                     dialog->accept();
                     preferenceChanged();
                     schedule();
@@ -965,6 +1057,13 @@ void SearchWindow::showReply(const SearchReply &reply) {
     }
 }
 
+void SearchWindow::updatePreviewImage() {
+    if (!preview_pixmap_.isNull()) {
+        preview_image_->setPixmap(preview_pixmap_.scaled(
+            preview_image_->contentsRect().size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
+}
+
 void SearchWindow::selectResult() {
     const auto current = results_->currentIndex();
     const auto path = current.isValid()
@@ -980,6 +1079,9 @@ void SearchWindow::selectResult() {
 void SearchWindow::requestPreview() {
     preview_text_->clear();
     preview_image_->clear();
+    preview_pixmap_ = {};
+    preview_image_->hide();
+    preview_text_->hide();
     if (!preview_enabled_->isChecked() || !isVisible() || isMinimized()) {
         return;
     }
@@ -1077,6 +1179,9 @@ void SearchWindow::copyPath() {
 }
 
 bool SearchWindow::eventFilter(QObject *watched, QEvent *event) {
+    if (watched == preview_image_ && event->type() == QEvent::Resize) {
+        updatePreviewImage();
+    }
     if (watched == results_ && event->type() == QEvent::KeyPress) {
         const auto *key = static_cast<QKeyEvent *>(event);
         if ((key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) &&

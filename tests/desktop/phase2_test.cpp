@@ -13,6 +13,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QGroupBox>
 #include <QImage>
 #include <QImageReader>
 #include <QJsonDocument>
@@ -161,6 +162,123 @@ class Phase2Tests final : public QObject {
         std::stop_source stopped;
         stopped.request_stop();
         QVERIFY(!runPreview({path, {}}, stopped.get_token(), process()).ok);
+    }
+    void sidebarTypesLimitAndCompactLayout() {
+        std::mutex mutex;
+        fileweaver::SearchRequest last;
+        std::atomic<int> calls = 0;
+        SearchWindow window([&](const auto &request, const auto &) {
+            const std::lock_guard lock(mutex);
+            last = request;
+            ++calls;
+            return result();
+        });
+        window.show();
+        window.setDatabase(QStringLiteral("C:/synthetic/index.sqlite"));
+        auto *view = control<QTreeView>(window, "results");
+        QTRY_VERIFY(control<QGroupBox>(window, "typeFilters")->height() < 250);
+        const auto before = view->height();
+        QTest::mouseClick(control<QPushButton>(window, "compactSettings"), Qt::LeftButton);
+        QTRY_VERIFY(view->height() > before);
+        control<QSpinBox>(window, "visibleResultLimit")->setValue(1000);
+        control<QCheckBox>(window, "typeFilter0")->setChecked(true);
+        control<QCheckBox>(window, "typeFilter1")->setChecked(true);
+        QTRY_VERIFY(calls.load() > 0);
+        QTRY_VERIFY(([&] {
+            const std::lock_guard lock(mutex);
+            return last.limit == 1000 && last.filters.extensions.size() == 20;
+        })());
+        control<QCheckBox>(window, "typeFilter0")->setChecked(false);
+        control<QCheckBox>(window, "typeFilter1")->setChecked(false);
+        QTRY_VERIFY(([&] {
+            const std::lock_guard lock(mutex);
+            return last.filters.extensions.empty();
+        })());
+    }
+    void imagePreviewUsesPaneWithoutEmptyTextEditor() {
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+        const auto path = native(temp.filePath(QStringLiteral("preview.png")));
+        QImage image(200, 100, QImage::Format_RGB32);
+        image.fill(Qt::green);
+        QVERIFY(image.save(path, "PNG"));
+        SearchWindow window([&](const auto &, const auto &) {
+            return std::vector<fileweaver::SearchResult>{
+                {1, 1, path.toStdString(), "preview.png", 1}};
+        });
+        window.resize(1280, 900);
+        window.show();
+        QTest::mouseClick(control<QPushButton>(window, "compactSettings"), Qt::LeftButton);
+        window.setDatabase(QStringLiteral("C:/synthetic/index.sqlite"));
+        QTRY_VERIFY(control<QTreeView>(window, "results")->currentIndex().isValid());
+        control<QCheckBox>(window, "previewEnabled")->setChecked(true);
+        auto *picture = control<QLabel>(window, "previewImage");
+        QTRY_VERIFY(!picture->pixmap().isNull());
+        QVERIFY(picture->isVisible());
+        QVERIFY(!control<QPlainTextEdit>(window, "previewText")->isVisible());
+        const auto pixmap = picture->pixmap();
+        QVERIFY(pixmap.width() > 256);
+        QVERIFY(std::abs(pixmap.width() - pixmap.height() * 2) <= 2);
+        QVERIFY(pixmap.width() <= picture->width());
+        control<QCheckBox>(window, "previewEnabled")->setChecked(false);
+        QVERIFY(picture->pixmap().isNull());
+    }
+    void jpegOrientationIsAppliedWithoutDistortion() {
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+        QImage image(80, 40, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        for (int y = 0; y < 40; ++y) {
+            for (int x = 40; x < 80; ++x) {
+                image.setPixelColor(x, y, Qt::blue);
+            }
+        }
+        QByteArray jpeg;
+        QBuffer buffer(&jpeg);
+        QVERIFY(buffer.open(QIODevice::WriteOnly));
+        QVERIFY(image.save(&buffer, "JPEG", 100));
+        // EXIF little-endian orientation 6: rotate 90 degrees clockwise.
+        const auto exif = QByteArray::fromHex(
+            "ffe1002245786966000049492a0008000000010012010300010000000600000000000000");
+        jpeg.insert(2, exif);
+        const auto path = native(temp.filePath(QStringLiteral("oriented.jpg")));
+        write(path, jpeg);
+        const auto reply = runPreview({path, {}}, {}, process());
+        QVERIFY2(reply.ok, qPrintable(reply.message));
+        QCOMPARE(reply.image.height(), reply.image.width() * 2);
+        QVERIFY(reply.image.pixelColor(reply.image.width() / 2, reply.image.height() / 4).red() >
+                200);
+        QVERIFY(
+            reply.image.pixelColor(reply.image.width() / 2, reply.image.height() * 3 / 4).blue() >
+            200);
+    }
+    void jpegMirrorOrientationIsApplied() {
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+        QImage image(80, 40, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        for (int y = 0; y < 40; ++y) {
+            for (int x = 40; x < 80; ++x) {
+                image.setPixelColor(x, y, Qt::blue);
+            }
+        }
+        QByteArray jpeg;
+        QBuffer buffer(&jpeg);
+        QVERIFY(buffer.open(QIODevice::WriteOnly));
+        QVERIFY(image.save(&buffer, "JPEG", 100));
+        jpeg.insert(
+            2, QByteArray::fromHex(
+                   "ffe1002245786966000049492a0008000000010012010300010000000200000000000000"));
+        const auto path = native(temp.filePath(QStringLiteral("mirrored.jpg")));
+        write(path, jpeg);
+        const auto reply = runPreview({path, {}}, {}, process());
+        QVERIFY2(reply.ok, qPrintable(reply.message));
+        QCOMPARE(reply.image.width(), reply.image.height() * 2);
+        QVERIFY(reply.image.pixelColor(reply.image.width() / 4, reply.image.height() / 2).blue() >
+                200);
+        QVERIFY(
+            reply.image.pixelColor(reply.image.width() * 3 / 4, reply.image.height() / 2).red() >
+            200);
     }
     void previewImagesCacheChecksumAndCorruption() {
         QTemporaryDir temp;
@@ -459,7 +577,9 @@ class Phase2Tests final : public QObject {
         enabled->setChecked(true);
         QTRY_VERIFY(!image->pixmap().isNull());
         QVERIFY(status->text().contains(QStringLiteral("PDF 第一頁")));
-        QCOMPARE(image->pixmap().toImage().pixelColor(128, 128), QColor(Qt::red));
+        QCOMPARE(image->pixmap().toImage().pixelColor(image->pixmap().width() / 2,
+                                                      image->pixmap().height() / 2),
+                 QColor(Qt::red));
         window.hide();
         QTRY_VERIFY(!enabled->isChecked());
         QVERIFY(image->pixmap().isNull());
@@ -470,7 +590,9 @@ class Phase2Tests final : public QObject {
         QVERIFY(!enabled->isChecked());
         enabled->setChecked(true);
         QTRY_VERIFY(!image->pixmap().isNull());
-        QCOMPARE(image->pixmap().toImage().pixelColor(128, 128), QColor(Qt::blue));
+        QCOMPARE(image->pixmap().toImage().pixelColor(image->pixmap().width() / 2,
+                                                      image->pixmap().height() / 2),
+                 QColor(Qt::blue));
         QVERIFY(status->text().contains(QStringLiteral("PDF 第一頁")));
         QTest::mouseClick(control<QPushButton>(window, "previewClear"), Qt::LeftButton);
         QVERIFY(image->pixmap().isNull());

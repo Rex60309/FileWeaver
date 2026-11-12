@@ -20,6 +20,8 @@ struct SearchFilters {
     // Strict UTC Unix-nanosecond bounds; neither boundary is included.
     std::optional<std::int64_t> modified_after;
     std::optional<std::int64_t> modified_before;
+    // OR within this bounded set; AND with the legacy single extension filter.
+    std::vector<std::string> extensions;
 };
 struct SearchRequest {
     std::filesystem::path database;

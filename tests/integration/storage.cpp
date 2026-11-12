@@ -1112,6 +1112,37 @@ TEST_CASE("Search extension and inclusive size filters combine before limiting")
     REQUIRE(fileweaver::search_files(request).empty());
 }
 
+TEST_CASE("Multi-extension filters bind values before ranking and limits") {
+    Fixture fixture;
+    const auto root = fixture.directory / "source";
+    std::filesystem::create_directory(root);
+    for (const auto *name : {"a.txt", "b.PNG", "c.pdf", "noextension"}) {
+        std::ofstream(root / name) << "fixture";
+    }
+    fileweaver::initialize_database(fixture.path());
+    static_cast<void>(
+        fileweaver::index_directory({fixture.path(), root, {}}, [] { return std::int64_t{0}; }));
+    fileweaver::SearchRequest request{fixture.path(), "*", fileweaver::SearchMode::glob};
+    request.filters.extensions = {"TXT", ".png", "txt"};
+    REQUIRE(fileweaver::search_files(request).size() == 2);
+    request.limit = 1;
+    REQUIRE(fileweaver::search_files(request)[0].name == "a.txt");
+    request.filters.extension = "pdf";
+    REQUIRE(fileweaver::search_files(request).empty());
+    request.filters.extension.reset();
+    request.filters.extensions = {"' OR 1=1 --"};
+    REQUIRE(fileweaver::search_files(request).empty());
+    request.filters.extensions = {""};
+    REQUIRE(fileweaver::search_files(request)[0].name == "noextension");
+    request.filters.extensions = {"bad/path"};
+    REQUIRE_THROWS(fileweaver::search_files(request));
+    request.filters.extensions.assign(65, "txt");
+    REQUIRE_THROWS(fileweaver::search_files(request));
+    request.filters.extensions.clear();
+    request.limit = 100;
+    REQUIRE(fileweaver::search_files(request).size() == 4);
+}
+
 TEST_CASE("Search root filter selects exact registered membership without requiring live roots") {
     Fixture fixture;
     const auto first = fixture.directory / "first";

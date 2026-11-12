@@ -260,6 +260,7 @@ QByteArray previewDocument(const PreviewRequest &request) {
                                                 : extension == u"bmp" ? "bmp"
                                                                       : "jpeg");
                     reader.setAutoDetectImageFormat(false);
+                    reader.setAutoTransform(true);
                     auto size = reader.size();
                     // BMP uses a signed height for top-down storage. Bound it
                     // before negation, including the unrepresentable INT_MIN.
@@ -276,7 +277,8 @@ QByteArray previewDocument(const PreviewRequest &request) {
                         throw std::runtime_error("Corrupt or unsupported image");
                     }
                     thumbnail =
-                        thumbnail.scaled(scaled, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+                        thumbnail
+                            .scaled(QSize(256, 256), Qt::KeepAspectRatio, Qt::SmoothTransformation)
                             .convertToFormat(QImage::Format_RGBA8888);
                 }
                 const auto length = thumbnail.width() * thumbnail.height() * 4;
