@@ -174,7 +174,7 @@ PreviewReply parsePreview(const QByteArray &payload) {
             ? QStringLiteral("GIF 首張畫面預覽（不播放動畫）；唯讀且不執行文件指令。")
         : reply.truncated
             ? QStringLiteral("僅顯示檔案前 64 KiB／2000 行以內；不執行程式碼或文件指令。")
-            : QStringLiteral("唯讀預覽；不執行程式碼或文件指令。");
+            : QString{};
     return reply;
 }
 PreviewReply runPreview(const PreviewRequest &request, const std::stop_token &stop,

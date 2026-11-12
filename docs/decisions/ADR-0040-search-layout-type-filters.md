@@ -44,3 +44,15 @@ Hosted MSVC and supported-core sanitizers are separate acceptance evidence;
 Windows GUI combined ASan/UBSan is unsupported locally. Tests never use real data.
 No pagination, unlimited retrieval, source-resolution preview, new formats,
 Linux desktop work, release packaging or Phase 3 features are included.
+
+## Follow-up: horizontal toolbar and content-only pane
+
+2026-11-12: user requests removing the generic preview notice and moving type
+checkboxes into one horizontal row, keeping the right side for content. Types
+and the existing result limit move above the splitter; a disabled preview hides
+the right pane entirely. Normal text/image success has an empty notice; empty
+notice labels are hidden. Errors, loading, truncation and GIF/PDF-specific labels
+remain visible. No file-reading policy, decoder cap, schema/dependency/API or
+threading change. Existing layout/image tests additionally verify horizontal
+checkbox alignment and absence of the generic notice. Local Windows Debug/Release
+builds/tests, core/desktop format and lint passed; hosted checks remain pending.

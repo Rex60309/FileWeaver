@@ -176,7 +176,9 @@ class Phase2Tests final : public QObject {
         window.show();
         window.setDatabase(QStringLiteral("C:/synthetic/index.sqlite"));
         auto *view = control<QTreeView>(window, "results");
-        QTRY_VERIFY(control<QGroupBox>(window, "typeFilters")->height() < 250);
+        QTRY_VERIFY(control<QGroupBox>(window, "typeFilters")->height() < 100);
+        QCOMPARE(control<QCheckBox>(window, "typeFilter0")->geometry().top(),
+                 control<QCheckBox>(window, "typeFilter4")->geometry().top());
         const auto before = view->height();
         QTest::mouseClick(control<QPushButton>(window, "compactSettings"), Qt::LeftButton);
         QTRY_VERIFY(view->height() > before);
@@ -215,6 +217,7 @@ class Phase2Tests final : public QObject {
         auto *picture = control<QLabel>(window, "previewImage");
         QTRY_VERIFY(!picture->pixmap().isNull());
         QVERIFY(picture->isVisible());
+        QVERIFY(!control<QLabel>(window, "previewStatus")->isVisible());
         QVERIFY(!control<QPlainTextEdit>(window, "previewText")->isVisible());
         const auto pixmap = picture->pixmap();
         QVERIFY(pixmap.width() > 256);

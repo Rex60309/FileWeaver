@@ -363,7 +363,7 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     auto *types = new QGroupBox(QStringLiteral("檔案類型（可複選；未勾選為全部）"), sidebar);
     types->setObjectName(QStringLiteral("typeFilters"));
     types->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-    auto types_layout = std::make_unique<QVBoxLayout>();
+    auto types_layout = std::make_unique<QHBoxLayout>();
     const std::vector<std::pair<QString, std::vector<std::string>>> groups{
         {QStringLiteral("圖片"),
          {"png", "jpg", "jpeg", "bmp", "gif", "webp", "tif", "tiff", "svg", "ico"}},
@@ -387,17 +387,17 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
         types_layout->addWidget(check);
         connect(check, &QCheckBox::toggled, this, &SearchWindow::schedule);
     }
-    types->setLayout(types_layout.release());
-    sidebar_layout->addWidget(types);
     auto *limit_row = new QHBoxLayout();
-    limit_row->addWidget(new QLabel(QStringLiteral("最多顯示"), sidebar));
-    visible_limit_ = new QSpinBox(sidebar);
+    limit_row->addWidget(new QLabel(QStringLiteral("最多顯示"), types));
+    visible_limit_ = new QSpinBox(types);
     visible_limit_->setObjectName(QStringLiteral("visibleResultLimit"));
     visible_limit_->setRange(1, 1000);
     visible_limit_->setValue(static_cast<int>(result_limit_));
     limit_row->addWidget(visible_limit_);
     limit_row->addStretch();
-    sidebar_layout->addLayout(limit_row);
+    types_layout->addLayout(limit_row);
+    types->setLayout(types_layout.release());
+    layout->addWidget(types);
     connect(visible_limit_, &QSpinBox::valueChanged, this, [this](int value) {
         result_limit_ = static_cast<std::size_t>(value);
         preferenceChanged();
@@ -439,8 +439,10 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
     splitter->setStretchFactor(0, 2);
     splitter->setStretchFactor(1, 1);
     preview_pane_->hide();
+    sidebar->hide();
     layout->addWidget(splitter, 1);
-    connect(preview_enabled_, &QCheckBox::toggled, this, [this](bool enabled) {
+    connect(preview_enabled_, &QCheckBox::toggled, this, [this, sidebar](bool enabled) {
+        sidebar->setVisible(enabled);
         preview_pane_->setVisible(enabled);
         previewer_.clear();
         preview_text_->clear();
@@ -458,6 +460,7 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
         preview_text_->hide();
         preview_image_->hide();
         preview_status_->setText(QStringLiteral("快取已要求清除；重新選取檔案可再次預覽。"));
+        preview_status_->show();
     });
     connect(external_open, &QPushButton::clicked, this,
             [this] { requestSelected(FileAction::open); });
@@ -471,6 +474,7 @@ SearchWindow::SearchWindow(SearchController::Search search, QWidget *parent, Hot
         preview_text_->hide();
         preview_image_->hide();
         preview_status_->setText(preview(reply.message, 512));
+        preview_status_->setVisible(!reply.message.isEmpty());
         if (reply.ok) {
             preview_text_->setPlainText(reply.text);
             preview_text_->setVisible(reply.image.isNull());
@@ -1077,6 +1081,7 @@ void SearchWindow::selectResult() {
 }
 
 void SearchWindow::requestPreview() {
+    preview_status_->show();
     preview_text_->clear();
     preview_image_->clear();
     preview_pixmap_ = {};

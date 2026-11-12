@@ -73,7 +73,7 @@ Further work is prioritized for Windows; release packaging is out of scope.
 | 2 extension | Opt-in BMP static preview and all-format hide lifecycle regression | Tested |
 | 2 presentation | Original app logo, embedded Windows executable icon and Qt window icon (local Windows GCC) | Tested |
 | 2 UX | Folder-first managed-index creation, cancellation and bounded empty-query browsing | Tested (local Windows GCC; hosted CI pending) |
-| 2 UX | Right-side multi-type filtering, visible result limit, compact settings and EXIF-aware fitted image preview | Tested (local Windows GCC; hosted CI pending) |
+| 2 UX | Horizontal multi-type filtering, visible result limit, compact settings and EXIF-aware fitted image preview | Tested (local Windows GCC; hosted CI pending) |
 | Future | Multi-root/CLI watch and PDF navigation/interaction | Planned |
 | 3 | Analysis, duplicates, organizer, rename, journal | Planned |
 | 4 | Project launcher, opt-in clipboard, activity | Planned |

@@ -106,3 +106,36 @@ in ADR-0040; CLI option/JSON contracts remain unchanged. GUI categories/compact
 state are transient. Existing preview opt-in, subprocess/IPC/cache caps remain.
 Remaining: hosted MSVC and supported-core sanitizer verification; no pagination,
 unlimited results or higher-resolution decoding has been implemented.
+
+## Follow-up: horizontal filter toolbar and preview notice
+
+2026-11-12: user requested removing the generic successful-preview notice and
+moving file types into one horizontal row. Type checkboxes and the existing
+1-1000 result control now sit above the list/preview splitter. The right pane is
+hidden completely when preview is disabled. With preview enabled its entire
+area is reserved for content, loading/errors and necessary format/truncation
+messages. Normal text/image success has no generic notice and hides its label.
+The read-only/opt-in and parser-resource policies are unchanged.
+
+Existing desktop regressions now assert horizontal checkbox alignment, compact
+toolbar height and a hidden notice for a successful PNG preview. Real-widget
+visual inspection used generated temporary files, Qt minimal with fonts/Fusion,
+and build/toolbar-actual-window.png; this is not a native-theme capture. The
+visual test passed 3/3 including setup/cleanup. Output and logs remain ignored.
+
+Same exact preset commands as above; ignored phase2_tests output name is now
+phase2_tests_toolbar. Application remains fileweaver-desktop-updated.exe locally.
+Logs for this follow-up use build/toolbar-*. Final acceptance is pending.
+No source files/indexes, schema, dependencies, clipboard or runtime network
+behavior were changed; no higher-resolution preview or new formats were added.
+
+### Follow-up final local acceptance
+
+Core Debug/Release 13/13 each; desktop Debug/Release 16/16 each, no skipped tests.
+All core/desktop builds, format-check and lint completed with exit 0. Logs:
+build/toolbar-tests-{debug,release,desktop-debug,desktop-release}.log,
+toolbar-{debug-build-final,release-build,format,lint}.log and
+toolbar-core-{debug-build,release-build,format,lint}.log. git diff --check passed.
+The pending follow-up checkpoint above is superseded by these results. No current
+hosted MSVC/portable-core sanitizer execution is claimed; local Windows GUI
+combined ASan/UBSan remains unsupported. No release or push is part of this slice.
