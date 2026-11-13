@@ -49,6 +49,7 @@ FileWeaver leaves source files unchanged. Enable previews, monitoring and the ho
 ## Build / 建置
 
 建置前請準備 C++20 編譯器、CMake 3.25+、Ninja、Python 3 和 vcpkg，並將 `VCPKG_ROOT` 指向 vcpkg 目錄。使用 Windows/MSVC 時，請在開發者命令提示字元或開發者 PowerShell 中執行。
+
 Requires a C++20 compiler, CMake 3.25+, Ninja, Python 3 and vcpkg. Set `VCPKG_ROOT`; use a developer shell for Windows/MSVC.
 
 ```powershell
@@ -58,6 +59,7 @@ ctest --preset desktop-release --output-on-failure
 ```
 
 僅建置 CLI 時改用 `release` preset。首次桌面建置需下載／編譯 Qt、Poppler 等套件。執行時保留相依 DLL、Qt 外掛與 `fileweaver-preview-worker.exe`。
+
 For CLI-only builds, use the `release` preset. The first desktop build downloads/compiles Qt, Poppler and other dependencies. Keep the adjacent DLLs, Qt plugins and preview worker with the executable.
 
 ### CLI
@@ -72,6 +74,7 @@ For CLI-only builds, use the `release` preset. The first desktop build downloads
 ## Performance / 本機量測
 
 測試環境: Windows 11、i7-13700KF、約 32 GiB RAM、NVMe SSD，Release 建置。使用本機產生的合成資料，快取未清除。
+
 Test Environment: Windows 11, i7-13700KF, about 32 GiB RAM, NVMe SSD, Release build. The datasets are synthetic and caches were not cleared.
 
 | 項目 / Metric | 1 萬 / 10k | 10 萬 / 100k |
@@ -85,9 +88,11 @@ Test Environment: Windows 11, i7-13700KF, about 32 GiB RAM, NVMe SSD, Release bu
 | CLI 峰值記憶體 / Peak working set³ | 11.91 MiB | 11.91 MiB |
 
 搜尋每個案例測量 30 次，時間包含 CLI 啟動與 JSON 處理。¹ 模糊搜尋列出四個案例各自 p95 的範圍，另含記憶體觀測成本。² 索引列出三輪的中位數；變動包含新增、修改、改名、刪除各 10 個檔案。³ 記憶體是另測六次查詢的程序峰值，不是 GUI 用量。
+
 Each search case ran 30 times, including CLI startup and JSON processing. ¹ Fuzzy values span the p95 of four cases and include memory-observer overhead. ² Index values are medians of three rounds; changes comprise 10 creations, updates, renames and deletions each. ³ Memory is the peak from six extra CLI searches, not GUI memory.
 
 索引重掃仍接近首次建立的時間，這部分值得後續分析。上述數字只適用於這組測試，不代表 GUI 延遲。
+
 Rescans took about as long as initial indexing and are worth profiling next. These results apply to this test setup and do not measure GUI latency.
 
 [完整數據、條件與重現指令 / Full results and reproduction steps](docs/performance/windows-20261113.md)
@@ -95,9 +100,11 @@ Rescans took about as long as initial indexing and are worth profiling next. The
 ## Status / 狀態
 
 目前本機 Debug 和 Release 都已通過核心 13 項、桌面 16 項測試，以及格式與靜態檢查。最新介面還沒跑遠端測試，Actions 目前暫停。若要使用程式，請先自行建置，目前還沒有獨立安裝包。
+
 Both local Debug and Release builds passed all 13 core tests and 16 desktop tests, along with formatting and static checks. The latest UI changes have not run remote tests because Actions is paused. Build from source to try the app; an installer is not available yet.
 
 相依套件與散布授權注意事項見 [Dependency overlays](ports/README.md)。
+
 See [Dependency overlays](ports/README.md) for dependency and redistribution licensing notes.
 
 [Architecture / 架構](docs/architecture.md) · [Benchmarks / 量測紀錄](docs/performance/)
