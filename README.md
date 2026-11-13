@@ -69,6 +69,13 @@ For CLI-only builds, use the `release` preset. The first desktop build downloads
 .\build\release\fileweaver.exe --help
 ```
 
+## Performance / 本機量測
+
+2026-11-13 本機 Release 測試中，10 萬個合成檔案的 CLI 精確搜尋 p95 為 **27.45 ms**，子字串搜尋為 **75.71 ms**；四個模糊搜尋案例的 p95 為 **91.90–107.49 ms**。這些是暖快取下的指定案例，包含 CLI 啟動與 JSON 處理。
+In the local Release run on 2026-11-13, CLI p95 was **27.45 ms** for exact search and **75.71 ms** for substring search over 100k synthetic files. Four fuzzy-search cases had p95 values of **91.90–107.49 ms**. These are warm-cache test cases, including CLI startup and JSON processing.
+
+[完整數據、索引與記憶體量測 / Results and reproduction steps](docs/performance/windows-20261113.md)
+
 ## Status / 狀態
 
 目前本機 Debug 和 Release 都已通過核心 13 項、桌面 16 項測試，以及格式與靜態檢查。最新介面還沒跑遠端測試，Actions 目前暫停。若要使用程式，請先自行建置，目前還沒有獨立安裝包。
